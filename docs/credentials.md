@@ -46,6 +46,7 @@ The credentials file is mounted read-only into every task container as `/opt/gcp
 | `--gcp_credentials_file` | parameter | credentials are not at the default path | host path of the credentials JSON. Default: `$HOME/.config/gcloud/application_default_credentials.json` |
 | `--image_tag` | parameter | you want a different image version | tag of the Drop-seq tool images (default `jn_test`; the images must already be available to Docker) |
 | `--python_image` | parameter | you use a different registry or name | image name without tag (default `quay.io/broadinstitute/drop-seq_python`) |
+| `--java_image` | parameter | you use a different registry or name | image name without tag of the private Java tools (default `us-docker.pkg.dev/mccarroll-scrna-seq/us.gcr.io/drop-seq_private_java`) |
 
 ### Pre-flight check
 

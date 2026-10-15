@@ -35,6 +35,12 @@
                     "default": "quay.io/broadinstitute/drop-seq_python",
                     "fa_icon": "fab fa-docker"
                 },
+                "java_image": {
+                    "type": "string",
+                    "description": "Docker image (registry/name, without tag) for the private Java Drop-seq tools.",
+                    "default": "us-docker.pkg.dev/mccarroll-scrna-seq/us.gcr.io/drop-seq_private_java",
+                    "fa_icon": "fab fa-docker"
+                },
                 "image_tag": {
                     "type": "string",
                     "description": "Tag of the Drop-seq tool images, so the whole workflow is pinned to one version.",

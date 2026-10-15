@@ -1,0 +1,109 @@
+nextflow_process {
+
+    name "Test Process MERGE_LIBRARY_METADATA"
+    script "modules/local/merge_library_metadata/main.nf"
+    process "MERGE_LIBRARY_METADATA"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "merge_library_metadata"
+
+    // Contract: tuple val(meta), path(tsvs) -> combined: tuple val(meta), path('<ext.prefix ?: meta.id>.txt').
+    // Output columns are the union of the input columns (missing values empty); rows are the inputs' rows in input order.
+    // The file-level config sets no ext.args; a test needing --index-col sets index.config itself. There is no live test: the merged outputs are checked by the final integration test.
+    // Fixtures: tests/fixtures/README.md.
+
+    def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
+
+    test("Should concatenate two libraries keeping every row, in input order, named for meta.id") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_b.tsv") ] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.combined[0][1])
+            assertAll(
+                { assert process.success },
+                { assert process.out.combined.size() == 1 },
+                // meta propagated, name from meta.id
+                { assert process.out.combined[0][0] == [ id:'analysis1' ] },
+                { assert file(process.out.combined[0][1]).name == 'analysis1.txt' },
+                // header + 2 + 2 rows; same header; rows of lib_a first, then lib_b, content unchanged
+                { assert lines.size() == 5 },
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'donor'] },
+                { assert lines.drop(1) == [
+                    ['LIB_A', 'AAAA', '100', 'd1'], ['LIB_A', 'CCCC', '200', 'd2'],
+                    ['LIB_B', 'AAAA', '300', 'd1'], ['LIB_B', 'GGGG', '400', 'd3'] ] }
+            )
+        }
+    }
+
+    test("Should fill a column missing from some input files with empty values, without shifting other values") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_c_extra_column.tsv") ] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.combined[0][1])
+            assertAll(
+                { assert process.success },
+                // union of columns: the extra column is added at the end
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'donor', 'cell_type'] },
+                { assert lines.size() == 4 },
+                { assert lines.drop(1) == [
+                    ['LIB_A', 'AAAA', '100', 'd1', ''], ['LIB_A', 'CCCC', '200', 'd2', ''],
+                    ['LIB_C', 'TTTT', '500', 'd2', 'neuron'] ] }
+            )
+        }
+    }
+
+    test("Should pass a single input file through with identical content") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv") ] ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert file(process.out.combined[0][1]).text == file("${moduleDir}/tests/fixtures/lib_a.tsv").text }
+            )
+        }
+    }
+
+    test("Should fail when two inputs contain the same (PREFIX, cell_barcode) and --index-col is given") {
+
+        // ext.args is '--index-col PREFIX --index-col cell_barcode', as for the combined cell metadata in the pipeline
+        config "./index.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_a_duplicate_cell.tsv") ] ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.failed },
+                // the tool's duplicate-key error, not some other failure (stdout/stderr placement varies, so search both)
+                { assert (process.stdout + process.stderr).join('\n').contains('Duplicate keys found') }
+            )
+        }
+    }
+}

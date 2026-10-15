@@ -1,0 +1,142 @@
+nextflow_process {
+
+    name "Test Process BUILD_LIBRARY_CELL_METADATA"
+    script "modules/local/build_library_cell_metadata/main.nf"
+    process "BUILD_LIBRARY_CELL_METADATA"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "build_library_cell_metadata"
+
+    // Contract: tuple val(meta), path(cell_metadata), path(mmc_tsv or []), path(extra_files or [])
+    //           -> cell_metadata: tuple val(meta), path('<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt').
+    // The file-level config sets no ext.args; tests needing arguments name filters.config or join.config.
+    // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
+
+    def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
+
+    test("Should add PREFIX as the first column and keep the rows unchanged") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            assertAll(
+                { assert process.success },
+                { assert process.out.cell_metadata.size() == 1 },
+                // meta propagated; name from meta.id
+                { assert process.out.cell_metadata[0][0] == [ id:'LIB_A' ] },
+                { assert file(process.out.cell_metadata[0][1]).name == 'LIB_A.joined_filtered_cell_metadata.txt' },
+                // PREFIX = meta.id first, then the original columns and rows in order
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor'] },
+                { assert lines.drop(1) == [
+                    ['LIB_A', 'AAAA', '100', '0.05', 'd1'],
+                    ['LIB_A', 'CCCC', '200', '0.25', 'd2'],
+                    ['LIB_A', 'GGGG', '300', '0.01', 'd3'] ] }
+            )
+        }
+    }
+
+    test("Should left-join MapMyCells on cell_barcode and keep a cell without an annotation") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), [] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            assertAll(
+                { assert process.success },
+                // MapMyCells columns are added after the input columns; the join key cell_id is not added
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor', 'M_class_name'] },
+                // all 3 cells kept; CCCC has no annotation, so an empty value
+                { assert lines.drop(1) == [
+                    ['LIB_A', 'AAAA', '100', '0.05', 'd1', 'Glut'],
+                    ['LIB_A', 'CCCC', '200', '0.25', 'd2', ''],
+                    ['LIB_A', 'GGGG', '300', '0.01', 'd3', 'GABA'] ] }
+            )
+        }
+    }
+
+    test("Should apply the donor override and filters, including a filter on a MapMyCells column") {
+
+        config "./filters.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), [] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def header = lines[0]
+            assertAll(
+                { assert process.success },
+                // CCCC removed by --max pct_mt 0.1 (0.25); GGGG removed by --exclude M_class_name GABA (a joined column)
+                { assert lines.size() == 2 },
+                { assert lines[1][header.indexOf('cell_barcode')] == 'AAAA' },
+                // donor overridden by --set; PREFIX stays the library id
+                { assert lines[1][header.indexOf('donor')] == 'N1' },
+                { assert lines[1][header.indexOf('PREFIX')] == 'LIB_A' },
+                { assert lines[1][header.indexOf('M_class_name')] == 'Glut' }
+            )
+        }
+    }
+
+    test("Should join a staged extra file named in ext.args") {
+
+        config "./join.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [ file("${moduleDir}/tests/fixtures/extra.tsv") ] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            assertAll(
+                { assert process.success },
+                // extra.tsv's columns are added (its join column cell is not); GGGG, absent from extra.tsv, is kept with an empty value
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor', 'extra_flag'] },
+                { assert lines.drop(1).collect { it[[1, 5]] } == [ ['AAAA', 'yes'], ['CCCC', 'no'], ['GGGG', ''] ] }
+            )
+        }
+    }
+
+    test("Should add no MapMyCells columns when the library has no MapMyCells TSV") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_NA' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            assertAll(
+                { assert process.success },
+                { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor'] },
+                { assert lines.size() == 4 },
+                { assert lines.drop(1).every { it[0] == 'LIB_NA' } }
+            )
+        }
+    }
+}

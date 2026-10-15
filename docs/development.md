@@ -6,11 +6,18 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
 ## Conventions
 
 - Leaf-first, test-driven: each module is built and tested on its own before it is wired into the workflow.
-- Test conventions (file layout, names, one file per concern) are in [testing.md](testing.md).
-- Tool containers are parameters (`--python_image`, `--image_tag`, default `jn_test`). Local images must already exist.
+- Test conventions (file layout, names, file layout) are in [testing.md](testing.md).
+- Tool containers are parameters (`--python_image`, `--java_image`, `--image_tag`, default `jn_test`). Local images must already exist.
 - Run `nextflow lint .` after changing config or Nextflow files; it currently reports no errors (some unused-parameter
   warnings from the template remain). Workflow and include names must be valid identifiers: use underscores
   (`SCRNA_AGGREGATION`), never the hyphens of the pipeline name.
+
+- Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args`.
+- Java modules: image `${params.java_image}:${params.image_tag}`, JVM heap `(task.memory.toMega() * 0.8) as int` MB, and `--TMP_DIR` in the task
+  directory (the container's default temp dir is not writable). Fixture tests set `params.java_image` to the local image and a small `process.resourceLimits`.
+
+- Shared Groovy for tests lives in `tests/lib/` (`libDir` in `nf-test.config`), for example `LiveFiles.contentMd5` for the live comparisons: put
+  repeated test helpers there instead of copying them between test files. (`projectDir` is only visible inside `when`/`then` blocks, not in suite-level closures.)
 
 ## Gotchas
 
@@ -33,3 +40,10 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
   Unanchored, `data/` and `testing*` silently ignored `docs/testing.md` and the `tests/fixtures/data/` fixture files, so they were
   missing from a push. After adding files, check `git status --short --ignored` for anything unexpectedly ignored
   (expected: `.claude/`, `.nf-test/`, `.nf-test.log`).
+- **The Python tools rewrite numbers** (`0.9000` -> `0.9`, `0.20` -> `0.2`): fixtures should have no trailing zeros, and tests compare the rewritten text.
+- **Build a manifest or any multi-line text in the process script as one line** (e.g. `--YAML '{...}'`): the script block's indentation breaks YAML written
+  with a heredoc, and an expected-failure test can then pass for the wrong reason, so assert the tool's own message.
+- **Interrupted nf-test runs leave `.nf-test-*.nf` files in the repo root**; delete them (they show up in `git status`).
+- **Files under `/private/tmp/...` (the agent scratchpad) are not visible to Docker bind mounts**: mount from inside the repo instead.
+- **The host Python has no `yaml` module**: use the container's Python (`docker run -i ... /usr/local/dropseq/venv/dropseq/bin/python - < script.py`).
+- **macOS has no `zcat` for `.gz`** (it looks for `.Z`): use `gzip -dc` or `gzcat`.

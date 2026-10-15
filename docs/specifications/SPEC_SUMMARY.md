@@ -69,8 +69,22 @@ The original validated run, kept for reference and never modified, is in `/Users
 - Prototype uses absolute host paths inside files (triplet manifest, artifacts yaml); in Nextflow the manifest must be
   generated inside the task from staged files (basenames).
 - `libraries.tsv` and args files are produced at runtime -> parse with splitCsv(sep:'\t', header:true) after the
-  resolve step; args files must be read into task input (staged as path, read in script) or by `.text.readLines()`.
+  resolve step; the per-library filter/join arguments will be built by the workflow from the manifest and passed as `ext.args` (see TODO_STATUS Done 0c); older idea of reading the args file in the script is superseded.
 - Optional MMC (value `NA`) -> per-library conditional; cell-type column is a runtime value (file content) that
   gates steps 7 and 9; donor presence is a runtime check of the header gating 7-9.
 - Prototype gather steps need meta.id and stable ordering (cat_tsvs output order follows input order; sort by library).
 - No `zcat` on macOS for .gz: use `gzip -dc` when inspecting fixtures locally.
+
+## Module for each prototype step (status in TODO_STATUS.md)
+| Step | Module |
+|---|---|
+| 1a | LOCATE_SCRNA_ARTIFACTS |
+| 1b | RESOLVE_AGGREGATION_MANIFEST |
+| 2a | SUMMARIZE_SCRNA_EXPERIMENTS |
+| 2b, 6 | MERGE_LIBRARY_METADATA (twice: library metrics, cell metadata) |
+| 3b | FORMAT_MAPMYCELLS_ANNOTATIONS (tool `convert_mmc_csv`) |
+| 3d | BUILD_LIBRARY_CELL_METADATA (tool `join_and_filter_tsv`) |
+| 4, 5 | MAKE_TRIPLET_DGE |
+| 7 | DONOR_CELL_TYPE_REPORT (planned) |
+| 8, 9 | MAKE_METACELLS_FROM_TRIPLET_DGE (planned) |
+

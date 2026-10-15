@@ -1,0 +1,126 @@
+nextflow_process {
+
+    name "Test Process MAKE_TRIPLET_DGE"
+    script "modules/local/make_triplet_dge/main.nf"
+    process "MAKE_TRIPLET_DGE"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "make_triplet_dge"
+
+    // Contract: tuple val(meta), val(prefixes), path(dges), path(barcode_lists) + path(reduced_gtf)
+    //           -> matrix / barcodes / features: tuple val(meta), path('matrix.mtx.gz' / 'barcodes.tsv.gz' / 'features.tsv.gz').
+    // Fixtures: tests/fixtures/README.md. Uses the local private Java image (nextflow.config). No live test:
+    // the merged matrix is checked by the final integration test.
+
+    def gzLines = { f -> new java.util.zip.GZIPInputStream(new FileInputStream(f.toString())).newReader().readLines() }
+
+    test("Should merge two libraries: prefixed barcodes in library order and the expected matrix entries") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def matrix = gzLines(process.out.matrix[0][1])
+            assertAll(
+                { assert process.success },
+                // meta propagated; fixed names
+                { assert process.out.matrix[0][0] == [ id:'analysis1' ] },
+                { assert file(process.out.matrix[0][1]).name == 'matrix.mtx.gz' },
+                { assert file(process.out.barcodes[0][1]).name == 'barcodes.tsv.gz' },
+                { assert file(process.out.features[0][1]).name == 'features.tsv.gz' },
+                // cells: <prefix>_<barcode>, library order, then DGE column order
+                { assert gzLines(process.out.barcodes[0][1]) == ['LIB_A_AAAA', 'LIB_A_GGGG', 'LIB_B_AAAA', 'LIB_B_TTTT'] },
+                // 3 genes x 4 cells, 7 non-zero entries; rows genes (GENEA..C), columns the barcodes above
+                { assert matrix.findAll { !it.startsWith('%') }.take(1) == ['3\t4\t7'] },
+                { assert matrix.findAll { !it.startsWith('%') }.drop(1).collect { it.split('\t') as List } == [
+                    ['1', '1', '1'], ['1', '2', '2'], ['1', '3', '7'], ['2', '4', '8'], ['3', '1', '4'], ['3', '2', '5'], ['3', '3', '9'] ] }
+            )
+        }
+    }
+
+    test("Should keep only the cells in each barcode list") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def barcodes = gzLines(process.out.barcodes[0][1])
+            def matrix = gzLines(process.out.matrix[0][1]).findAll { !it.startsWith('%') }
+            assertAll(
+                { assert process.success },
+                // CCCC is in lib_a.dge.txt (GENEB = 3) but not in lib_a.cells.tsv: not a cell, and its count is not in the matrix
+                { assert !barcodes.contains('LIB_A_CCCC') },
+                { assert barcodes.size() == 4 },
+                // GENEB (row 2) only has LIB_B_TTTT (column 4); LIB_A's GENEB count (CCCC) was filtered out
+                { assert matrix.drop(1).findAll { it.split(/\s+/)[0] == '2' }.size() == 1 }
+            )
+        }
+    }
+
+    test("Should write features with gene_id and gene_name in matrix row order") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def matrixHeader = gzLines(process.out.matrix[0][1]).findAll { !it.startsWith('%') }[0].split(/\s+/) as List
+            def features = gzLines(process.out.features[0][1])
+            assertAll(
+                { assert process.success },
+                { assert features == ['ENSG01\tGENEA\tGene Expression', 'ENSG02\tGENEB\tGene Expression', 'ENSG03\tGENEC\tGene Expression'] },
+                // matrix header = genes, cells, non-zero entries: consistent with the features and barcodes files
+                { assert matrixHeader[0] as int == features.size() },
+                { assert matrixHeader[1] as int == gzLines(process.out.barcodes[0][1]).size() }
+            )
+        }
+    }
+
+    test("Should fail when two libraries give the same prefixed barcode") {
+
+        when {
+            process {
+                """
+                // both libraries use the prefix LIB_A and have the cell AAAA
+                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_A' ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.failed },
+                { assert process.out.matrix.isEmpty() },
+                // the tool reports the duplicate, not a manifest error
+                { assert (process.stdout + process.stderr).join('\n').contains('Output CBCs are not unique') }
+            )
+        }
+    }
+}

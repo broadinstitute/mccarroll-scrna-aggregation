@@ -17,6 +17,4 @@ ADC=${HOME}/.config/gcloud/application_default_credentials.json
 command -v nf-test >/dev/null || { echo "ERROR: nf-test not found on PATH" >&2; exit 1; }
 [[ -d tests/live_data/baseline/artifacts ]] || { echo "ERROR: no baseline in tests/live_data/baseline: run the prototype shell script first (see docs/testing.md, Live tests)" >&2; exit 1; }
 
-export SCRNA_LIVE_MANIFEST=$REPO/tests/live_data/manifest.yaml
-export SCRNA_LIVE_BASELINE_ROOT=$REPO/tests/live_data/baseline
 exec nf-test test

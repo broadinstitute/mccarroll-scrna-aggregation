@@ -1,0 +1,71 @@
+nextflow_process {
+
+    name "Test Process MAKE_TRIPLET_DGE against the baseline"
+    script "modules/local/make_triplet_dge/main.nf"
+    process "MAKE_TRIPLET_DGE"
+    config "./live.config"
+    tag "modules"
+    tag "modules_local"
+    tag "make_triplet_dge"
+    tag "live"
+
+    // Live test: needs Docker and the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no network or credentials.
+    // Merges the baseline's DGEs (a local copy in tmp/<library>/) with the baseline's per-library cell metadata as the barcode lists, in the
+    // order of resolved_manifest/libraries.tsv, and compares the sparse DGE with the baseline's matrix.mtx.gz, barcodes.tsv.gz and
+    // features.tsv.gz: the decompressed content must be identical (md5 first; the lines are compared only to report a mismatch).
+
+    test("Should reproduce the baseline sparse DGE (matrix, barcodes and features) of all the baseline libraries") {
+
+        when {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def table = new File(root, 'resolved_manifest/libraries.tsv')
+            assert table.isFile() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+            def lines = table.readLines()
+            def header = lines[0].split('\t', -1) as List
+            def rows = lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
+            assert rows : "no libraries in ${table}"
+            def prefixes = rows.collect { "'${it.library_id}'" }.join(', ')
+            // the baseline keeps a local copy of each DGE in tmp/<library>/ and of the reduced GTF in tmp/
+            def dges = rows.collect { "file('${root}/tmp/${it.library_id}/${new File(it.dge).name}')" }.join(', ')
+            def barcodeLists = rows.collect { "file('${root}/${it.library_id}.joined_filtered_cell_metadata.txt')" }.join(', ')
+            def gtf = "${root}/tmp/${new File(rows[0].reduced_gtf).name}"
+            process {
+                """
+                input[0] = [ [ id:'live_analysis' ], [ ${prefixes} ], [ ${dges} ], [ ${barcodeLists} ] ]
+                input[1] = file('${gtf}')
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def outputs = [ matrix: 'matrix.mtx.gz', barcodes: 'barcodes.tsv.gz', features: 'features.tsv.gz' ]
+            def failures = []
+            println ""
+            outputs.each { emit, name ->
+                def generated = file(process.out[emit][0][1])
+                def baseline = new File(root, name)
+                println "${emit}:"
+                println "  Generated: ${generated}"
+                println "  Baseline:  ${baseline}"
+                def generatedMd5 = LiveFiles.contentMd5(generated)
+                if (generatedMd5 == LiveFiles.contentMd5(baseline)) {
+                    println "  matches baseline (md5 ${generatedMd5})"
+                } else {
+                    def g = LiveFiles.lines(generated)
+                    def b = LiveFiles.lines(baseline)
+                    def diffs = LiveFiles.differingLines(g, b)
+                    println "  differs from the baseline: ${diffs.size()} differing line(s):"
+                    diffs.take(10).each { i ->
+                        println "      line ${i + 1}: generated=${i < g.size() ? g[i] : '(missing)'} baseline=${i < b.size() ? b[i] : '(missing)'}"
+                    }
+                    failures << emit
+                }
+            }
+            assertAll(
+                { assert process.success },
+                { assert failures.isEmpty() : "outputs differing from the baseline: ${failures}" }
+            )
+        }
+    }
+}
