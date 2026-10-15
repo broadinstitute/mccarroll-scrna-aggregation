@@ -28,6 +28,25 @@
                     "format": "directory-path",
                     "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
                     "fa_icon": "fas fa-folder-open"
+                },
+                "python_image": {
+                    "type": "string",
+                    "description": "Docker image (registry/name, without tag) for the Python Drop-seq tools.",
+                    "default": "quay.io/broadinstitute/drop-seq_python",
+                    "fa_icon": "fab fa-docker"
+                },
+                "image_tag": {
+                    "type": "string",
+                    "description": "Tag of the Drop-seq tool images, so the whole workflow is pinned to one version.",
+                    "default": "jn_test",
+                    "fa_icon": "fas fa-tag"
+                },
+                "gcp_credentials_file": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Host path of the GCP credentials JSON (gcloud Application Default Credentials or a service account key), mounted read-only into task containers when running with the docker profile.",
+                    "help_text": "Defaults to $HOME/.config/gcloud/application_default_credentials.json, created by 'gcloud auth application-default login'. On a cluster or VM, point it at a service account key JSON. Treat a key file as a secret. Only checked for the docker profile.",
+                    "fa_icon": "fas fa-key"
                 }
             }
         },

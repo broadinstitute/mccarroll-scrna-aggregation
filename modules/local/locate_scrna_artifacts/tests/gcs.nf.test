@@ -1,0 +1,80 @@
+nextflow_process {
+
+    name "Test Process LOCATE_SCRNA_ARTIFACTS against gs://"
+    script "modules/local/locate_scrna_artifacts/main.nf"
+    process "LOCATE_SCRNA_ARTIFACTS"
+    config "./gcs.config"
+    tag "modules"
+    tag "modules_local"
+    tag "locate_scrna_artifacts"
+    tag "gcs"
+
+    // Live test: needs network, a GCP credentials JSON (params.gcp_credentials_file) and the
+    // docker profile. SCRNA_LIVE_MANIFEST must name an aggregation manifest of real gs:// DGEs.
+    // Optional: SCRNA_LIVE_BASELINE_DIR names a directory of validated <uei>.yaml files (for example the artifacts
+    // directory of a prototype shell script run). Each generated YAML is then compared field by field to its baseline,
+    // and the baseline path and any differences are printed.
+    // Run: SCRNA_LIVE_MANIFEST=/path/manifest.yaml nf-test test modules/local/locate_scrna_artifacts/tests/gcs.nf.test --profile docker,test
+
+    test("Should locate artifacts of real gs:// libraries with the mounted ADC") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'live_analysis' ], file(System.getenv('SCRNA_LIVE_MANIFEST')) ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            def yamls = dir.listFiles().findAll { it.name.endsWith('.yaml') }
+            def datasets = yamls.collect { new org.yaml.snakeyaml.Yaml().load(it.text).datasets[0] }
+            // show where the generated artifact YAMLs are, for inspection after the run
+            println ""
+            println "Generated artifact YAMLs:"
+            yamls.sort { it.name }.each { println "  ${it}" }
+
+            // optional comparison with validated baseline YAMLs, flattened to dotted keys
+            def flatten
+            flatten = { Map m, String prefix = '' ->
+                m.collectEntries { k, v ->
+                    v instanceof Map ? flatten(v, "${prefix}${k}.") : [("${prefix}${k}".toString()): v]
+                }
+            }
+            def baselineDir = System.getenv('SCRNA_LIVE_BASELINE_DIR')
+            def differences = [:]
+            println ""
+            if (!baselineDir) {
+                println "Baseline: SCRNA_LIVE_BASELINE_DIR not set, no baseline comparison"
+            } else {
+                yamls.each { generated ->
+                    def baseline = new File(baselineDir, generated.name)
+                    println "Baseline YAML: ${baseline}"
+                    if (!baseline.exists()) {
+                        differences[generated.name] = ['(baseline file missing)']
+                    } else {
+                        def actual = flatten(new org.yaml.snakeyaml.Yaml().load(generated.text).datasets[0])
+                        def expected = flatten(new org.yaml.snakeyaml.Yaml().load(baseline.text).datasets[0])
+                        def keys = (actual.keySet() + expected.keySet()).sort()
+                        def diffs = keys.findAll { actual[it] != expected[it] }.collect { "${it}: generated=${actual[it]} baseline=${expected[it]}".toString() }
+                        differences[generated.name] = diffs
+                        println(diffs ? "  ${diffs.size()} difference(s):" : "  matches baseline (${actual.size()} fields)")
+                        diffs.each { println "    ${it}" }
+                    }
+                }
+            }
+            assertAll(
+                { assert process.success },
+                { assert yamls.size() >= 1 },
+                // each file is named by its uei and points at gs:// artifacts that were actually found
+                { assert yamls.collect { it.name } .sort() == datasets.collect { "${it.uei}.yaml".toString() }.sort() },
+                { assert datasets.every { it.user_dge.startsWith('gs://') } },
+                { assert datasets.every { it.dge_selected_cells.startsWith('gs://') } },
+                // when a baseline is given, every generated YAML matches it exactly
+                { assert differences.every { name, diffs -> diffs.isEmpty() } }
+            )
+        }
+    }
+
+}

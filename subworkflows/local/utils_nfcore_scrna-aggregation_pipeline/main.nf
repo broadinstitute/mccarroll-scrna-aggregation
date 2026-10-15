@@ -40,6 +40,11 @@ workflow PIPELINE_INITIALISATION {
     ch_versions = channel.empty()
 
     //
+    // Fail before any process starts if a local docker run has no usable GCP credentials file to mount
+    //
+    checkLocalGcpCredentials(workflow.profile, params.gcp_credentials_file, System.getenv('GOOGLE_PROJECT_ID'))
+
+    //
     // Print version and exit if required and dump pipeline parameters to JSON file
     //
     UTILS_NEXTFLOW_PIPELINE (
@@ -135,6 +140,53 @@ workflow PIPELINE_COMPLETION {
     FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+
+//
+// Fail fast when a local (docker profile) run cannot mount usable GCP credentials.
+// If the host file is missing, Docker silently creates a directory at the mount source and tasks
+// then fail later with an obscure credentials error.
+//   profile:         comma-separated Nextflow profile string, e.g. 'docker'
+//   credentialsFile: host path of the credentials JSON (params.gcp_credentials_file): gcloud Application Default
+//                    Credentials (type authorized_user) or a service account key (type service_account)
+//   projectId:       value of the GOOGLE_PROJECT_ID environment variable (null or empty if unset). The Google
+//                    storage client needs a project; an authorized_user file has none, a service_account key does.
+//
+def checkLocalGcpCredentials(String profile, String credentialsFile, String projectId) {
+    if (!profile.tokenize(',').contains('docker')) {
+        return
+    }
+    def credentials = file(credentialsFile)
+    if (!credentials.isFile()) {
+        error("GCP credentials not found as a file at '${credentialsFile}'. " +
+            "Run 'gcloud auth application-default login' or set --gcp_credentials_file to a credentials JSON " +
+            "(Application Default Credentials or a service account key).")
+    }
+    def json
+    try {
+        json = new groovy.json.JsonSlurper().parseText(credentials.text)
+    } catch (Exception e) {
+        json = null
+    }
+    if (!(json instanceof Map)) {
+        error("GCP credentials file '${credentialsFile}' is not valid JSON.")
+    }
+    def requiredFields = [
+        authorized_user: ['client_id', 'client_secret', 'refresh_token'],
+        service_account: ['client_email', 'private_key']
+    ]
+    if (!requiredFields.containsKey(json.type)) {
+        error("GCP credentials file '${credentialsFile}' has unsupported credential type '${json.type}'; " +
+            "expected one of ${requiredFields.keySet().join(', ')}.")
+    }
+    def missing = requiredFields[json.type].findAll { !json[it] }
+    if (missing) {
+        error("GCP credentials file '${credentialsFile}' (${json.type}) is missing required field(s): ${missing.join(', ')}.")
+    }
+    if (json.type == 'authorized_user' && !projectId) {
+        error("A GCP project ID is required with Application Default Credentials. " +
+            "Export GOOGLE_PROJECT_ID=<your project id> (the project ID, not the project number).")
+    }
+}
 
 //
 // Validate channels from input samplesheet

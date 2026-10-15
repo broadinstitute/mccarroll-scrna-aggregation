@@ -1,0 +1,176 @@
+nextflow_process {
+
+    name "Test Process LOCATE_SCRNA_ARTIFACTS"
+    script "modules/local/locate_scrna_artifacts/main.nf"
+    process "LOCATE_SCRNA_ARTIFACTS"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "locate_scrna_artifacts"
+
+    // Contract: tuple val(meta), path(manifest) -> tuple val(meta), path('artifacts') emitted as artifacts_dir.
+    // The 'artifacts' directory holds one <uei>.yaml per manifest DGE, each with a 'datasets' list of length 1.
+    // Fixtures (tests/fixtures) are a synthetic local tree mounted at /fixtures:
+    //   LIB_A: complete (village V1, mmc MODEL1, two pipeline traces, reference with reduced GTF)
+    //   LIB_B: minimal (no village, mmc, trace or reference)
+    // The live gs:// test is in gcs.nf.test.
+
+    test("Should emit one artifacts YAML per library in the manifest") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            def yamls = dir.listFiles().findAll { it.name.endsWith('.yaml') }.sort { it.name }
+            def datasets = yamls.collect { new org.yaml.snakeyaml.Yaml().load(it.text).datasets }
+            assertAll(
+                { assert process.success },
+                // no library lost or duplicated, and each file is named by the uei it describes
+                { assert yamls*.name == ['LIB_A.yaml', 'LIB_B.yaml'] },
+                { assert datasets.every { it.size() == 1 } },
+                { assert datasets.collect { it[0].uei } == ['LIB_A', 'LIB_B'] }
+            )
+        }
+    }
+
+    test("Should fail when two manifest DGEs are from the same experiment") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_duplicate_uei.yaml") ]
+                """
+            }
+        }
+
+        then {
+            // error text may land on stdout or stderr depending on the environment
+            def output = (process.stdout + process.stderr).join('\n')
+            assertAll(
+                { assert process.failed },
+                { assert output.contains('duplicate uei values') },
+                { assert output.contains('LIB_A') }
+            )
+        }
+    }
+
+    test("Should record missing optional artifacts as NA rather than dropping them") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            def a = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_A.yaml').text).datasets[0]
+            def b = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_B.yaml').text).datasets[0]
+            assertAll(
+                { assert process.success },
+                // LIB_B has no mmc, village or trace: fields present with the value NA
+                { assert ['mmc', 'village_properties', 'dge_donors', 'pipeline_trace', 'reduced_gtf'].every { b.containsKey(it) } },
+                { assert ['mmc', 'village_properties', 'dge_donors', 'pipeline_trace', 'reduced_gtf'].every { b[it] == 'NA' } },
+                // LIB_B still has its standard_analysis artifacts
+                { assert b.dge_selected_cells.endsWith('LIB_B.selected.digital_expression.txt.gz') },
+                // LIB_A has them all; the most recent trace is chosen, and mmc is keyed by model
+                { assert a.mmc.keySet() == ['MODEL1'] as Set },
+                { assert a.pipeline_trace.endsWith('execution_trace_2026-02-02_00-00-00.txt') },
+                { assert a.reduced_gtf.endsWith('REF.reduced.gtf') }
+            )
+        }
+    }
+
+    test("Should carry the manifest donor into the artifacts YAML, NA when not set") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            def a = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_A.yaml').text).datasets[0]
+            def b = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_B.yaml').text).datasets[0]
+            assertAll(
+                { assert process.success },
+                { assert a.donor == 'NA' },
+                { assert b.donor == 'N1' }
+            )
+        }
+    }
+
+    test("Should propagate meta and emit a directory named artifacts") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                """
+            }
+        }
+
+        then {
+            def emitted = process.out.artifacts_dir[0]
+            assertAll(
+                { assert process.success },
+                { assert process.out.artifacts_dir.size() == 1 },
+                { assert emitted[0].id == 'test_analysis' },
+                { assert file(emitted[1]).isDirectory() },
+                { assert file(emitted[1]).name == 'artifacts' }
+            )
+        }
+    }
+
+    test("Should emit the expected artifact paths, and every path should exist in the fixture tree") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            // flatten nested maps (mmc) to dotted keys
+            def flatten
+            flatten = { Map m, String prefix = '' ->
+                m.collectEntries { k, v ->
+                    v instanceof Map ? flatten(v, "${prefix}${k}.") : [("${prefix}${k}".toString()): v]
+                }
+            }
+            def yaml = new org.yaml.snakeyaml.Yaml()
+            def fixtures = "${moduleDir}/tests/fixtures"
+            def results = ['LIB_A', 'LIB_B'].collectEntries { lib ->
+                def actual = flatten(yaml.load(new File(dir.toString(), "${lib}.yaml").text).datasets[0])
+                def expected = flatten(yaml.load(new File("${fixtures}/expected/${lib}.yaml").text).datasets[0])
+                // paths in the YAML are container paths (/fixtures/...); map them to the host fixture tree
+                def missing = actual.findAll { k, v -> !(k in ['uei', 'donor']) && v != 'NA' && !new File(v.toString().replaceFirst('^/fixtures', fixtures)).exists() }
+                [(lib): [actual: actual, expected: expected, missing: missing.keySet()]]
+            }
+            assertAll(
+                { assert process.success },
+                // exact match with the reviewed expected YAML: no wrong, extra or missing field
+                { assert results.LIB_A.actual == results.LIB_A.expected },
+                { assert results.LIB_B.actual == results.LIB_B.expected },
+                // every non-NA path points at a file that exists
+                { assert results.LIB_A.missing.isEmpty() },
+                { assert results.LIB_B.missing.isEmpty() }
+            )
+        }
+    }
+
+}
