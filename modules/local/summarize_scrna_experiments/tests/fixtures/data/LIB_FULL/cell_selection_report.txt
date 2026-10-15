@@ -1,0 +1,2 @@
+medianReadsPerUMI	thresholdMessage	n_STAMPs	UMIs_ambient
+1.54		3	40

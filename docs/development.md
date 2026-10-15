@@ -29,3 +29,7 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
 - **Shell variables do not persist** between separate commands in the agent tooling, and commands over 120 s must run in the
   background: pass `GOOGLE_PROJECT_ID=... command` inline.
 - **Snapshots go stale.** Update one (`--update-snapshot`) only after inspecting the new output.
+- **`.gitignore` patterns from the nf-core template are anchored to the repo root** (`/data/`, `/testing/`, `/testing*`).
+  Unanchored, `data/` and `testing*` silently ignored `docs/testing.md` and the `tests/fixtures/data/` fixture files, so they were
+  missing from a push. After adding files, check `git status --short --ignored` for anything unexpectedly ignored
+  (expected: `.claude/`, `.nf-test/`, `.nf-test.log`).
