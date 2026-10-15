@@ -13,7 +13,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-include { SCRNA-AGGREGATION  } from './workflows/scrna-aggregation'
+include { SCRNA_AGGREGATION  } from './workflows/scrna-aggregation'
 include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
 include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
 /*
@@ -25,7 +25,7 @@ include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_scrn
 //
 // WORKFLOW: Run main analysis pipeline depending on type of input
 //
-workflow MCCARROLL_SCRNA-AGGREGATION {
+workflow MCCARROLL_SCRNA_AGGREGATION {
 
     take:
     samplesheet // channel: samplesheet read in from --input
@@ -35,7 +35,7 @@ workflow MCCARROLL_SCRNA-AGGREGATION {
     //
     // WORKFLOW: Run pipeline
     //
-    SCRNA-AGGREGATION (
+    SCRNA_AGGREGATION (
         samplesheet
     )
 }
@@ -66,7 +66,7 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
-    MCCARROLL_SCRNA-AGGREGATION (
+    MCCARROLL_SCRNA_AGGREGATION (
         PIPELINE_INITIALISATION.out.samplesheet
     )
     //

@@ -12,7 +12,7 @@ include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pi
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-workflow SCRNA-AGGREGATION {
+workflow SCRNA_AGGREGATION {
 
     take:
     ch_samplesheet // channel: samplesheet read in from --input

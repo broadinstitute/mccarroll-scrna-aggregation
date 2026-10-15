@@ -1,0 +1,2 @@
+dges:
+  - dge: gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/jn_SMRI_V11_rxn1_output/GRCh38_ensembl_v43/cbrb/auto_lr-0.00000625/cell_selection/auto/standard_analysis/village/MODIFIED_donors_renamed_smri_gsa.imp.info_0.8.donor_assignment_filtered.2024-03-27_SMRI_V11/SMRI_V11_rxn1.donors.digital_expression.txt.gz

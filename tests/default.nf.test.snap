@@ -1,0 +1,19 @@
+{
+    "-profile test": {
+        "content": [
+            null,
+            [
+                "pipeline_info",
+                "pipeline_info/scrna-aggregation_software_versions.yml"
+            ],
+            [
+                
+            ]
+        ],
+        "timestamp": "2026-10-15T11:14:37.658993",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "26.10.0"
+        }
+    }
+}

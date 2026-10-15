@@ -1,0 +1,13 @@
+datasets:
+- uei: LIB_FULL
+  user_dge: NA
+  root_properties: /fixtures/data/LIB_FULL/properties.yaml
+  pipeline_trace: /fixtures/data/LIB_FULL/execution_trace_2026-03-04_00-00-00.txt
+  alignment_dir: /fixtures/data/LIB_FULL/REF
+  standard_analysis_dir: /fixtures/data/LIB_FULL/REF/standard_analysis
+  read_quality_metrics: /fixtures/data/LIB_FULL/read_quality_metrics.txt
+  chimeric_metrics: /fixtures/data/LIB_FULL/chimeric_metrics.txt
+  selected_cell_metadata: /fixtures/data/LIB_FULL/cmd.tsv
+  selected_cell_barcodes: /fixtures/data/LIB_FULL/selected_cell_barcodes.txt
+  dge_summary_selected_cells: /fixtures/data/LIB_FULL/selected_summary.txt
+  cell_selection_report: /fixtures/data/LIB_FULL/cell_selection_report.txt

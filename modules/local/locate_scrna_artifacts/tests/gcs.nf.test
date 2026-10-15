@@ -11,10 +11,10 @@ nextflow_process {
 
     // Live test: needs network, a GCP credentials JSON (params.gcp_credentials_file) and the
     // docker profile. SCRNA_LIVE_MANIFEST must name an aggregation manifest of real gs:// DGEs.
-    // Optional: SCRNA_LIVE_BASELINE_DIR names a directory of validated <uei>.yaml files (for example the artifacts
-    // directory of a prototype shell script run). Each generated YAML is then compared field by field to its baseline,
-    // and the baseline path and any differences are printed.
-    // Run: SCRNA_LIVE_MANIFEST=/path/manifest.yaml nf-test test modules/local/locate_scrna_artifacts/tests/gcs.nf.test --profile docker,test
+    // Optional: SCRNA_LIVE_BASELINE_ROOT names the output directory of a validated prototype run; its artifacts/
+    // directory holds the validated <uei>.yaml files. Each generated YAML is then compared field by field to its
+    // baseline, and the baseline path and any differences are printed.
+    // Run (or use tests/run_all_tests.sh): SCRNA_LIVE_MANIFEST=/path/manifest.yaml nf-test test modules/local/locate_scrna_artifacts/tests/gcs.nf.test
 
     test("Should locate artifacts of real gs:// libraries with the mounted ADC") {
 
@@ -42,11 +42,12 @@ nextflow_process {
                     v instanceof Map ? flatten(v, "${prefix}${k}.") : [("${prefix}${k}".toString()): v]
                 }
             }
-            def baselineDir = System.getenv('SCRNA_LIVE_BASELINE_DIR')
+            def baselineRoot = System.getenv('SCRNA_LIVE_BASELINE_ROOT')
+            def baselineDir = baselineRoot ? "${baselineRoot}/artifacts".toString() : null
             def differences = [:]
             println ""
             if (!baselineDir) {
-                println "Baseline: SCRNA_LIVE_BASELINE_DIR not set, no baseline comparison"
+                println "Baseline: SCRNA_LIVE_BASELINE_ROOT not set, no baseline comparison"
             } else {
                 yamls.each { generated ->
                     def baseline = new File(baselineDir, generated.name)

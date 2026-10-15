@@ -1,0 +1,206 @@
+nextflow_process {
+
+    name "Test Process RESOLVE_AGGREGATION_MANIFEST"
+    script "modules/local/resolve_aggregation_manifest/main.nf"
+    process "RESOLVE_AGGREGATION_MANIFEST"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "resolve_aggregation_manifest"
+
+    // Contract: tuple val(meta), path(manifest), path(artifacts_dir) ->
+    //   libraries_tsv: tuple val(meta), path('resolved/libraries.tsv')
+    //   args_files:    tuple val(meta), path('resolved/*.join_and_filter_args.txt')  (one per library)
+    // Optional --reference / --mmc-model come from task.ext.args (set per test with 'process.ext.args').
+    // Fixtures (tests/fixtures), self-contained copies, not shared with other modules' tests:
+    //   artifacts/              LIB_A (village donor DGE, MODEL1) + LIB_B (selected-cells DGE, no MMC), same reference and GTF
+    //   artifacts_ref_mismatch/ LIB_B has a different reference
+    //   artifacts_gtf_mismatch/ LIB_B has a different reduced GTF
+    //   artifacts_two_models/   LIB_A has MODEL1 and MODEL2
+    //   manifest_two_libraries.yaml (LIB_B donor N1, no filters), manifest_with_filters.yaml (defaults + filters + join)
+    // library_id/dge/... columns are checked; artifact_file/args_file hold task-local absolute paths and are not.
+
+    test("Should resolve one libraries.tsv row per library with the correct DGE, metadata and MMC columns") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts") ]
+                """
+            }
+        }
+
+        then {
+            def sa = '/fixtures/LIB_%s/REF/cbrb/lr1/cell_selection/auto/standard_analysis'
+            def lines = file(process.out.libraries_tsv[0][1]).readLines()
+            def header = lines[0].split('\t', -1) as List
+            def rows = lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
+            assertAll(
+                { assert process.success },
+                // exactly one output tuple per channel, carrying meta
+                { assert process.out.libraries_tsv.size() == 1 },
+                { assert process.out.libraries_tsv[0][0].id == 'test_analysis' },
+                { assert process.out.args_files[0][0].id == 'test_analysis' },
+                { assert header == ['library_id', 'artifact_file', 'dge', 'cell_metadata', 'mmc_model', 'mmc_annotations', 'reduced_gtf', 'args_file'] },
+                // no library lost or duplicated
+                { assert rows*.library_id == ['LIB_A', 'LIB_B'] },
+                // LIB_A has a donor (village) DGE: it is chosen over the selected-cells DGE, and its cmd.tsv is the village one
+                { assert rows[0].dge == String.format(sa, 'A') + '/village/V1/LIB_A.donors.digital_expression.txt.gz' },
+                { assert rows[0].cell_metadata == String.format(sa, 'A') + '/village/V1/LIB_A.cmd.tsv' },
+                { assert rows[0].mmc_model == 'MODEL1' },
+                { assert rows[0].mmc_annotations == String.format(sa, 'A') + '/mmc/MODEL1/LIB_A.csv' },
+                // LIB_B has no donor DGE: the selected-cells DGE is chosen; no MMC gives NA
+                { assert rows[1].dge == String.format(sa, 'B') + '/LIB_B.selected.digital_expression.txt.gz' },
+                { assert rows[1].cell_metadata == String.format(sa, 'B') + '/LIB_B.cmd.tsv' },
+                { assert rows[1].mmc_model == 'NA' },
+                { assert rows[1].mmc_annotations == 'NA' },
+                // the shared reduced GTF is the same for every library
+                { assert rows*.reduced_gtf.unique() == ['/fixtures/reference/REF/REF.reduced.gtf'] }
+            )
+        }
+    }
+
+    test("Should write one join_and_filter args file per library with the donor, filters and joins as one argument per line") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_with_filters.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts") ]
+                """
+            }
+        }
+
+        then {
+            def files = process.out.args_files[0][1].collect { file(it) }.sort { it.name }
+            assertAll(
+                { assert process.success },
+                // one file per library
+                { assert files*.name == ['LIB_A.join_and_filter_args.txt', 'LIB_B.join_and_filter_args.txt'] },
+                // LIB_A has no filters of its own: it gets the dgeDefaults filter (exclude doublet from column doublet)
+                { assert files[0].readLines() == ['--exclude', 'doublet', 'doublet'] },
+                // LIB_B: manifest donor, join and its own filter (replacing the defaults)
+                { assert files[1].readLines() == ['--set', 'donor', 'N1', '--join', 'extra.tsv', 'cell_barcode', 'cell', '--max', 'pct_mt', '0.1'] }
+            )
+        }
+    }
+
+    test("Should emit an empty args file for a library with no donor, filters or joins") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts") ]
+                """
+            }
+        }
+
+        then {
+            def files = process.out.args_files[0][1].collect { file(it) }.sort { it.name }
+            assertAll(
+                { assert process.success },
+                { assert files*.name == ['LIB_A.join_and_filter_args.txt', 'LIB_B.join_and_filter_args.txt'] },
+                { assert files[0].readLines() == [] },
+                // donor from the manifest is applied
+                { assert files[1].readLines() == ['--set', 'donor', 'N1'] }
+            )
+        }
+    }
+
+    test("Should fail when libraries have different references") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts_ref_mismatch") ]
+                """
+            }
+        }
+
+        then {
+            // error text may land on stdout or stderr depending on the environment
+            def output = (process.stdout + process.stderr).join('\n')
+            assertAll(
+                { assert process.failed },
+                { assert output.toLowerCase().contains('reference') }
+            )
+        }
+    }
+
+    test("Should accept libraries with different references when --reference is given") {
+
+        when {
+            config "./reference_override.config"
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts_ref_mismatch") ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert file(process.out.libraries_tsv[0][1]).readLines().size() == 3 }
+            )
+        }
+    }
+
+    test("Should fail when libraries have different reduced GTFs") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts_gtf_mismatch") ]
+                """
+            }
+        }
+
+        then {
+            def output = (process.stdout + process.stderr).join('\n')
+            assertAll(
+                { assert process.failed },
+                { assert output.toLowerCase().contains('gtf') }
+            )
+        }
+    }
+
+    test("Should select the MMC model given by --mmc-model and give NA annotations where a library lacks MMC") {
+
+        when {
+            config "./mmc_model.config"
+            process {
+                """
+                input[0] = [ [ id:'test_analysis' ],
+                    file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"),
+                    file("${moduleDir}/tests/fixtures/artifacts_two_models") ]
+                """
+            }
+        }
+
+        then {
+            def lines = file(process.out.libraries_tsv[0][1]).readLines()
+            def header = lines[0].split('\t', -1) as List
+            def rows = lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
+            assertAll(
+                { assert process.success },
+                { assert rows[0].mmc_model == 'MODEL2' },
+                { assert rows[0].mmc_annotations == '/fixtures/LIB_A/mmc/MODEL2/LIB_A.csv' },
+                // LIB_B has no MMC at all: mmc_model echoes the requested model, but there are no annotations (NA),
+                // and mmc_annotations is what gates the MMC conversion downstream
+                { assert rows[1].mmc_annotations == 'NA' }
+            )
+        }
+    }
+}

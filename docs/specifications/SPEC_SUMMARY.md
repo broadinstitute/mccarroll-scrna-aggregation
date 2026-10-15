@@ -53,12 +53,15 @@ in the container (open question Q2).
 `ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`
 (+ intermediate `artifacts/`, `resolved_manifest/`).
 
-## Reference run (real data, validated, in /Users/nemesh/nextflow_aggregation_shell_script/out; DO NOT MODIFY)
+## Reference run (real data, validated)
+Reproducible from the repo: `tests/live_data/manifest.yaml` run through `scrna-aggregation_prototype.sh` with
+`--analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline` (git-ignored; see `docs/testing.md`, "Live tests").
+The original validated run, kept for reference and never modified, is in `/Users/nemesh/nextflow_aggregation_shell_script/out`.
 - 1 library `SMRI_V11_rxn1` (donor DGE, village), 238 cells (239 lines w/ header), 12778 genes, ~17 donors, MMC model
   HMBA_Human_WB_v0.5, cell type column `HMBA_Human_WB_v0.5_neighborhood_name`, empty args file.
-- Inputs fetched to `.../tmp/SMRI_V11_rxn1/`: `cmd.tsv` (238 rows), `mmc.csv` (3752 rows; superset of cells, hence the
+- Inputs fetched to `<out-dir>/tmp/SMRI_V11_rxn1/`: `cmd.tsv` (238 rows), `mmc.csv` (3752 rows; superset of cells, hence the
   left join), `*.donors.digital_expression.txt.gz` (12787 lines, 255 KB), `../tmp/GRCh38_ensembl_v43.reduced.gtf` (3.9M lines).
-- `manifest_no_donors.yaml` = second scenario (selected-cells DGE, no donor column, probably no MMC) -> exercises the skip branches (not yet run).
+- `tests/live_data/manifest_no_donors.yaml` = second scenario (selected-cells DGE, no donor column, probably no MMC) -> exercises the skip branches (not yet run).
 - Single library only: multi-library behavior (cat_tsvs union columns, index uniqueness, MakeTripletDge merging, cell
   type column mismatch error) is NOT covered by the reference run; synthetic second library needed for it.
 

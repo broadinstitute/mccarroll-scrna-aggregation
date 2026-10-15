@@ -1,0 +1,2 @@
+dges:
+  - dge: gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/jn_SMRI_V11_rxn1_no_donors_output/GRCh38_ensembl_v43/cbrb/auto_lr-0.00000625/cell_selection/auto/standard_analysis/SMRI_V11_rxn1_no_donors.selected.digital_expression.txt.gz
