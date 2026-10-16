@@ -1,0 +1,89 @@
+nextflow_pipeline {
+
+    name "Test pipeline input validation"
+    script "../main.nf"
+    tag "pipeline"
+    tag "pipeline_validation"
+
+    // The pipeline needs --manifest (the aggregation YAML), --analysis_id and --outdir. Bad inputs must stop the run in PIPELINE_INITIALISATION, before any
+    // process starts (so no Docker image is used and nothing is listed on gs://). The profile 'test' (conf/test.config) supplies the live manifest and
+    // the analysis id of the baseline; each test overrides what it checks.
+
+    test("Should fail before any process when --manifest is missing") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = null
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n')
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('manifest') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
+
+    test("Should fail before any process when --analysis_id is missing or has characters that are not safe in file names") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                analysis_id = null
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n')
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('analysis_id') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
+
+    test("Should reject an analysis id with a slash") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                analysis_id = "bad/id"
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n')
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('analysis_id') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
+
+    test("Should fail before any process on a manifest with an unknown key, naming the file, the DGE entry and the key") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${projectDir}/tests/fixtures/manifest_unknown_key.yaml"
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n')
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('manifest_unknown_key.yaml') },
+                { assert output.contains("Unexpected key 'filter'") },
+                { assert output.contains('dge entry 1') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
+}

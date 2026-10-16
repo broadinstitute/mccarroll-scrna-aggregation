@@ -8,9 +8,10 @@ nextflow_process {
     tag "modules_local"
     tag "build_library_cell_metadata"
 
-    // Contract: tuple val(meta), path(cell_metadata), path(mmc_tsv or []), path(extra_files or [])
+    // Contract: tuple val(meta), path(cell_metadata), path(mmc_tsv or []), path(args_file), path(extra_files or [])
     //           -> cell_metadata: tuple val(meta), path('<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt').
-    // The file-level config sets no ext.args; tests needing arguments name filters.config or join.config.
+    // args_file holds the manifest's donor, joins and filters for join_and_filter_tsv --args-file, one argument per line (an empty file for none);
+    // there is no ext.args.
     // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
 
     def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
@@ -20,7 +21,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [] ]
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
                 """
             }
         }
@@ -48,7 +49,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), [] ]
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
                 """
             }
         }
@@ -68,14 +69,13 @@ nextflow_process {
         }
     }
 
-    test("Should apply the donor override and filters, including a filter on a MapMyCells column") {
-
-        config "./filters.config"
+    test("Should apply the donor override and filters of the arguments file, including a filter on a MapMyCells column") {
 
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), [] ]
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"),
+                    file("${moduleDir}/tests/fixtures/args_donor_filters.txt"), [] ]
                 """
             }
         }
@@ -85,7 +85,7 @@ nextflow_process {
             def header = lines[0]
             assertAll(
                 { assert process.success },
-                // CCCC removed by --max pct_mt 0.1 (0.25); GGGG removed by --exclude M_class_name GABA (a joined column)
+                // CCCC removed by --max pct_mt 0.1 (0.25); GGGG removed by --exclude M_class_name GABA (a column of the MapMyCells join, which comes first)
                 { assert lines.size() == 2 },
                 { assert lines[1][header.indexOf('cell_barcode')] == 'AAAA' },
                 // donor overridden by --set; PREFIX stays the library id
@@ -96,14 +96,13 @@ nextflow_process {
         }
     }
 
-    test("Should join a staged extra file named in ext.args") {
-
-        config "./join.config"
+    test("Should join a staged extra file named in the arguments file") {
 
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [ file("${moduleDir}/tests/fixtures/extra.tsv") ] ]
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_join_extra.txt"),
+                    [ file("${moduleDir}/tests/fixtures/extra.tsv") ] ]
                 """
             }
         }
@@ -119,12 +118,34 @@ nextflow_process {
         }
     }
 
+    test("Should apply an argument with spaces, a dollar sign and a quote exactly as written in the arguments file") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_special_value.txt"), [] ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def donors = lines.drop(1).collect { it[lines[0].indexOf('donor')] }
+            assertAll(
+                { assert process.success },
+                // no shell quoting is involved: the value is one argument, not expanded, and not split at the spaces
+                { assert donors == ["N 1 \$HOME 'r'"] * 3 },
+                { assert lines.size() == 4 }
+            )
+        }
+    }
+
     test("Should add no MapMyCells columns when the library has no MapMyCells TSV") {
 
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_NA' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], [] ]
+                input[0] = [ [ id:'LIB_NA' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
                 """
             }
         }

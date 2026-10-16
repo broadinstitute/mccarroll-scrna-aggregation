@@ -1,0 +1,66 @@
+nextflow_process {
+
+    name "Test Process DONOR_CELL_TYPE_REPORT against the baseline"
+    script "modules/local/donor_cell_type_report/main.nf"
+    process "DONOR_CELL_TYPE_REPORT"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "donor_cell_type_report"
+    tag "live"
+
+    // Live test: needs Docker and the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no network or credentials.
+    // Runs the report on the baseline's merged cell metadata (<analysis>.cell_metadata.txt) with the baseline's cell type column
+    // (<analysis>.cell_type_column.txt, written by the prototype) and compares it with <analysis>.donor_cell_type.txt: equal md5s pass;
+    // the lines are only compared to report a mismatch.
+
+    // the analysis id is the prefix of the baseline's merged cell metadata file
+    def baselineAnalysis = { File root ->
+        def f = root.listFiles()?.find { it.name.endsWith('.cell_metadata.txt') }
+        assert f : "no <analysis>.cell_metadata.txt in ${root} (see docs/testing.md, Live tests)"
+        f.name - '.cell_metadata.txt'
+    }
+    def baselineCellTypeColumn = { File root, String analysis ->
+        def f = new File(root, "${analysis}.cell_type_column.txt")
+        assert f.isFile() : "no ${f.name} in ${root}: remake the baseline with the current prototype script (see docs/testing.md, Live tests)"
+        f.text.trim()
+    }
+
+    test("Should reproduce the baseline donor cell type report from the baseline cell metadata") {
+
+        when {
+            // projectDir is only visible inside the when/then blocks, so each block builds the baseline root.
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def analysis = baselineAnalysis(root)
+            def column = baselineCellTypeColumn(root, analysis)
+            process {
+                """
+                input[0] = [ [ id:'${analysis}' ], file('${root}/${analysis}.cell_metadata.txt'), '${column}' ]
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def generated = file(process.out.report[0][1])
+            def baseline = new File(root, "${baselineAnalysis(root)}.donor_cell_type.txt")
+            def generatedMd5 = LiveFiles.contentMd5(generated)
+            def same = generatedMd5 == LiveFiles.contentMd5(baseline)
+            def g = same ? [] : generated.readLines()
+            def b = same ? [] : baseline.readLines()
+            def diffs = same ? [] : LiveFiles.differingLines(g, b)
+            def shown = diffs.take(10).collect { i ->
+                "line ${i + 1}: generated=${i < g.size() ? g[i] : '(missing)'} baseline=${i < b.size() ? b[i] : '(missing)'}".toString() }
+            println ""
+            println "Generated: ${generated}"
+            println "Baseline:  ${baseline}"
+            println(same ? "  matches baseline (md5 ${generatedMd5})" : "  differs from the baseline: ${diffs.size()} differing line(s):")
+            shown.each { println "      ${it}" }
+            assertAll(
+                { assert process.success },
+                { assert generated.name == baseline.name },
+                { assert same : "donor cell type report differs from the baseline" }
+            )
+        }
+    }
+}

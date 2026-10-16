@@ -49,7 +49,7 @@ in the container (open question Q2).
 
 ## Outputs (published to outdir)
 `ID.library_metrics.txt`, `tearsheets/<lib>.standard_analysis_tearsheet.txt`, `<lib>.joined_filtered_cell_metadata.txt`,
-`ID.make_triplet_dge.yaml`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
+`ID.make_triplet_dge.yaml`, `ID.cell_type_column.txt` (only with MapMyCells results; added to the prototype 2026-10-16), `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
 `ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`
 (+ intermediate `artifacts/`, `resolved_manifest/`).
 
@@ -85,6 +85,6 @@ The original validated run, kept for reference and never modified, is in `/Users
 | 3b | FORMAT_MAPMYCELLS_ANNOTATIONS (tool `convert_mmc_csv`) |
 | 3d | BUILD_LIBRARY_CELL_METADATA (tool `join_and_filter_tsv`) |
 | 4, 5 | MAKE_TRIPLET_DGE |
-| 7 | DONOR_CELL_TYPE_REPORT (planned) |
-| 8, 9 | MAKE_METACELLS_FROM_TRIPLET_DGE (planned) |
+| 7 | DONOR_CELL_TYPE_REPORT |
+| 8, 9 | MAKE_METACELLS_FROM_TRIPLET_DGE (called twice: donor; donor and cell type) |
 

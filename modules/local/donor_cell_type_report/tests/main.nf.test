@@ -1,0 +1,95 @@
+nextflow_process {
+
+    name "Test Process DONOR_CELL_TYPE_REPORT"
+    script "modules/local/donor_cell_type_report/main.nf"
+    process "DONOR_CELL_TYPE_REPORT"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "donor_cell_type_report"
+
+    // Contract: tuple val(meta), path(cell_metadata), val(cell_type_column)
+    //           -> report: tuple val(meta), path('<ext.prefix ?: meta.id>.donor_cell_type.txt').
+    // Fixtures: tests/fixtures/README.md (expected counts, fractions and medians are worked out there).
+    // The live comparison with the baseline is in live.nf.test.
+
+    def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
+    def header = ['donor', 'cell_type', 'num_nuclei', 'fraction_nuclei', 'median_umis_per_nucleus']
+
+    test("Should count nuclei, fractions and median UMIs per donor and cell type in first-appearance order") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), 'M_class_name' ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.report[0][1])
+            assertAll(
+                { assert process.success },
+                { assert process.out.report.size() == 1 },
+                // meta propagated; name from meta.id
+                { assert process.out.report[0][0] == [ id:'analysis1' ] },
+                { assert file(process.out.report[0][1]).name == 'analysis1.donor_cell_type.txt' },
+                { assert lines[0] == header },
+                // donors, then cell types within a donor, in order of first appearance; fractions of the donor's cells,
+                // rounded to 3 places; medians of num_retained_transcripts (D2 GABA: even count, 10 and 25 -> 17.5)
+                { assert lines.drop(1) == [
+                    ['D1', 'Glut', '3', '0.75',  '200'],
+                    ['D1', 'GABA', '1', '0.25',  '50'],
+                    ['D2', 'GABA', '2', '0.667', '17.5'],
+                    ['D2', 'Glut', '1', '0.333', '7'] ] }
+            )
+        }
+    }
+
+    test("Should ignore cells with no donor and count cells with no cell type only in their donor's total") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata_missing_donor_or_cell_type.tsv"), 'M_class_name' ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.report[0][1])
+            assertAll(
+                { assert process.success },
+                { assert lines[0] == header },
+                // D1 has 5 cells (one with no cell type, which has no row): 3/5 and 1/5; medians unchanged.
+                // The no-donor Glut cell (5000 UMIs) is ignored; D3 has only an untyped cell, so no row.
+                { assert lines.drop(1) == [
+                    ['D1', 'Glut', '3', '0.6',   '200'],
+                    ['D1', 'GABA', '1', '0.2',   '50'],
+                    ['D2', 'GABA', '2', '0.667', '17.5'],
+                    ['D2', 'Glut', '1', '0.333', '7'] ] },
+                { assert !lines.any { it[0] == 'D3' || it[0] == '' } }
+            )
+        }
+    }
+
+    test("Should fail when the cell type column is not in the cell metadata") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), 'M_nope_name' ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.failed },
+                { assert process.out.report.isEmpty() },
+                // the tool names the missing column
+                { assert (process.stdout + process.stderr).join('\n').contains("No ['M_nope_name'] column(s)") }
+            )
+        }
+    }
+}

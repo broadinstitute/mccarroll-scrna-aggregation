@@ -1,0 +1,6 @@
+PREFIX	cell_barcode	donor	cell_type
+LIB_A	AAAA	D1	Glut
+LIB_A	CCCC	D1	GABA
+LIB_B	AAAA	D2	Glut
+LIB_B	GGGG		GABA
+LIB_B	TTTT	D2	GABA

@@ -10,7 +10,6 @@
 
 include { UTILS_NFSCHEMA_PLUGIN     } from '../../nf-core/utils_nfschema_plugin'
 include { paramsSummaryMap          } from 'plugin/nf-schema'
-include { samplesheetToList         } from 'plugin/nf-schema'
 include { paramsHelp                } from 'plugin/nf-schema'
 include { completionSummary         } from '../../nf-core/utils_nfcore_pipeline'
 include { UTILS_NFCORE_PIPELINE     } from '../../nf-core/utils_nfcore_pipeline'
@@ -30,7 +29,8 @@ workflow PIPELINE_INITIALISATION {
     monochrome_logs   // boolean: Do not use coloured log outputs
     nextflow_cli_args //   array: List of positional nextflow CLI args
     outdir            //  string: The output directory where the results will be saved
-    input             //  string: Path to input samplesheet
+    manifest          //  string: Path to the aggregation manifest (YAML)
+    analysis_id       //  string: Label of this aggregation
     help              // boolean: Display help message and exit
     help_full         // boolean: Show the full help message
     show_hidden       // boolean: Show hidden parameters in the help message
@@ -57,7 +57,7 @@ workflow PIPELINE_INITIALISATION {
     //
     // Validate parameters and generate parameter summary to stdout
     //
-    command = "nextflow run ${workflow.manifest.name} -profile <docker/singularity/.../institute> --input samplesheet.csv --outdir <OUTDIR>"
+    command = "nextflow run ${workflow.manifest.name} -profile <docker/singularity/.../institute> --manifest manifest.yaml --analysis_id <ID> --outdir <OUTDIR>"
 
     UTILS_NFSCHEMA_PLUGIN (
         workflow,
@@ -79,31 +79,23 @@ workflow PIPELINE_INITIALISATION {
     )
 
     //
-    // Create channel from input file provided through params.input
+    // Read and validate the aggregation manifest before any process starts (unknown keys, bad filters or joins, duplicate DGEs, files that
+    // would be staged under one name); an invalid manifest stops the run here, naming the file and the DGE entry
+    // Input: params.manifest, a YAML file. Emits: ch_entries, a value channel holding the list of entries (one map per DGE, manifest order:
+    // dge, donor, filters, joins, with dgeDefaults projected onto each).
     //
+    def manifest_entries = loadAggregationManifest(manifest)
+    ch_entries = channel.value(manifest_entries)
 
-    channel
-        .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-        .map {
-            meta, fastq_1, fastq_2 ->
-                if (!fastq_2) {
-                    return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
-                } else {
-                    return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
-                }
-        }
-        .groupTuple()
-        .map { samplesheet ->
-            validateInputSamplesheet(samplesheet)
-        }
-        .map {
-            meta, fastqs ->
-                return [ meta, fastqs.flatten() ]
-        }
-        .set { ch_samplesheet }
+    //
+    // Input: params.manifest and params.analysis_id. Emits: ch_manifest, a value channel with one item, tuple val(meta), path(manifest), where
+    // meta.id is the analysis id (the same for every run-level process)
+    //
+    ch_manifest = channel.value([ [ id: analysis_id ], file(manifest) ])
 
     emit:
-    samplesheet = ch_samplesheet
+    manifest    = ch_manifest   // value channel: tuple val(meta), path(manifest)
+    entries     = ch_entries    // value channel: List of manifest entries (maps)
     versions    = ch_versions
 }
 
@@ -189,16 +181,23 @@ def checkLocalGcpCredentials(String profile, String credentialsFile, String proj
 }
 
 //
-// Validate channels from input samplesheet
+// Read and validate the aggregation manifest (YAML), before any process runs.
+//   manifestPath: local or gs:// path of the manifest (params.manifest)
+//   returns: one map per DGE in manifest order, [dge, donor, filters, joins], with dgeDefaults projected onto each
+//            entry; see lib/AggregationManifest.groovy. Also checks that the files of each entry can be staged (lib/JoinFilterArguments.groovy).
+//            Calls error() naming the path and the problem if invalid.
 //
-def validateInputSamplesheet(input) {
-    def (metas, fastqs) = input[1..2]
-
-    // Check that multiple runs of the same sample are of the same datatype i.e. single-end / paired-end
-    def endedness_ok = metas.collect{ meta -> meta.single_end }.unique().size == 1
-    if (!endedness_ok) {
-        error("Please check input samplesheet -> Multiple runs of a sample must be of the same datatype i.e. single-end or paired-end: ${metas[0].id}")
+def loadAggregationManifest(String manifestPath) {
+    def manifestFile = file(manifestPath)
+    if (!manifestFile.exists()) {
+        error("Aggregation manifest not found: '${manifestPath}'.")
     }
-
-    return [ metas[0], fastqs ]
+    try {
+        def entries = AggregationManifest.parse(manifestFile.text)
+        // builds the arguments of each entry only to report a problem (two files staged under one name) before any process runs
+        entries.each { entry -> JoinFilterArguments.build(entry) }
+        return entries
+    } catch (IllegalArgumentException e) {
+        error("Invalid aggregation manifest '${manifestPath}': ${e.message}")
+    }
 }

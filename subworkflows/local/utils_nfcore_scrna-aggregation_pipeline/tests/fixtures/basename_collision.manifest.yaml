@@ -1,0 +1,6 @@
+# Two different files named keep.txt would be staged under the same name in the task directory.
+dges:
+  - dge: gs://b/one.donors.digital_expression.txt.gz
+    filters:
+      DONOR: {includeFile: /data/a/keep.txt}
+      doublet: {excludeFile: gs://b/other/keep.txt}

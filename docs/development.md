@@ -12,7 +12,7 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
   warnings from the template remain). Workflow and include names must be valid identifiers: use underscores
   (`SCRNA_AGGREGATION`), never the hyphens of the pipeline name.
 
-- Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args`.
+- Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args` (BUILD_LIBRARY_CELL_METADATA is the exception: the manifest's arguments come in a staged args file read with `--args-file`).
 - Java modules: image `${params.java_image}:${params.image_tag}`, JVM heap `(task.memory.toMega() * 0.8) as int` MB, and `--TMP_DIR` in the task
   directory (the container's default temp dir is not writable). Fixture tests set `params.java_image` to the local image and a small `process.resourceLimits`.
 

@@ -32,7 +32,7 @@ and a project ID. How you supply them depends on where the pipeline runs.
    amd64 only. This works on Apple Silicon through emulation, and is a no-op on an amd64 host:
 
    ```bash
-   nextflow run . -profile docker --input <...> --outdir <...>
+   nextflow run . -profile docker --manifest <...> --analysis_id <...> --outdir <...>
    ```
 
 The credentials file is mounted read-only into every task container as `/opt/gcp/adc.json`, and

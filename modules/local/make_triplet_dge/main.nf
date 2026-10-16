@@ -30,20 +30,29 @@ process MAKE_TRIPLET_DGE {
     if (dgeList.size() != prefixList.size() || barcodeListList.size() != prefixList.size()) {
         error "MAKE_TRIPLET_DGE needs one DGE and one barcode list per prefix, got ${prefixList.size()} prefixes, ${dgeList.size()} DGEs, ${barcodeListList.size()} barcode lists"
     }
-    // The manifest as one line of flow-style YAML, passed with --YAML (no manifest file to write and indent).
-    def entries = prefixList.indices.collect { i ->
-        "{dge: ${dgeList[i]}, prefix: ${prefixList[i]}, barcode_list: ${barcodeListList[i]}, barcode_column: cell_barcode}"
-    }.join(', ')
-    def manifest = "{dges: [${entries}]}"
+    // The manifest as block-style YAML lines, one 'dges' entry per library in merge order. Paths are the staged
+    // file names, relative to the task directory where manifest.yaml is written.
+    def manifestLines = ['dges:'] + prefixList.indices.collectMany { i ->
+        [
+            "  - dge: ${dgeList[i]}",
+            "    prefix: ${prefixList[i]}",
+            "    barcode_list: ${barcodeListList[i]}",
+            "    barcode_column: cell_barcode",
+        ]
+    }
+    // Written with printf (one quoted argument per line) rather than a heredoc, so the script's indent
+    // stripping cannot change the YAML indentation.
+    def manifestArgs = manifestLines.collect { line -> "'${line}'" }.join(' ')
     // 80% of the task memory for the JVM heap, leaving room for the JVM itself.
     def javaMemMb = (task.memory.toMega() * 0.8) as int
     """
+    printf '%s\\n' ${manifestArgs} > manifest.yaml
     mkdir -p tmp
     MakeTripletDge \\
         -m ${javaMemMb}m \\
         --TMP_DIR \$PWD/tmp \\
         --VALIDATION_STRINGENCY SILENT \\
-        --YAML '${manifest}' \\
+        --MANIFEST manifest.yaml \\
         --OUTPUT matrix.mtx.gz \\
         --OUTPUT_CELLS barcodes.tsv.gz \\
         --OUTPUT_FEATURES features.tsv.gz \\
@@ -52,6 +61,6 @@ process MAKE_TRIPLET_DGE {
 
     stub:
     """
-    touch matrix.mtx.gz barcodes.tsv.gz features.tsv.gz
+    touch manifest.yaml matrix.mtx.gz barcodes.tsv.gz features.tsv.gz
     """
 }

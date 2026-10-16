@@ -1,0 +1,76 @@
+nextflow_pipeline {
+
+    name "Test the whole pipeline against the baseline"
+    script "../main.nf"
+    tag "pipeline"
+    tag "live"
+
+    // Live integration test: needs Docker, the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"), network access to gs://
+    // and credentials, like the live module tests. The pipeline runs ONCE on tests/live_data/manifest.yaml (conf/test.config); only if it succeeds
+    // are the published files compared with the baseline made by the prototype script: equal md5 of the decompressed content first, and the
+    // differing lines only to report a mismatch. Each wired edge adds its comparisons here.
+    // Wired so far: LOCATE_SCRNA_ARTIFACTS (published in <outdir>/locate/artifacts/, one <uei>.yaml per library) and RESOLVE_LIBRARIES (its
+    // <analysis>.resolved_libraries.tsv stays in the task's work directory, not published; compared with the baseline's resolved_manifest/libraries.tsv
+    // on the columns both have: the baseline's artifact_file and args_file hold host paths).
+
+    def compare = { String what, generated, baseline ->
+        def same = LiveFiles.contentMd5(generated) == LiveFiles.contentMd5(baseline)
+        if (!same) {
+            def g = LiveFiles.lines(generated)
+            def b = LiveFiles.lines(baseline)
+            def diffs = LiveFiles.differingLines(g, b)
+            println ""
+            println "${what} differs from the baseline: ${diffs.size()} differing line(s):"
+            diffs.take(10).each { i ->
+                println "      line ${i + 1}: generated=${i < g.size() ? g[i].take(200) : '(missing)'} baseline=${i < b.size() ? b[i].take(200) : '(missing)'}"
+            }
+        }
+        same
+    }
+
+    test("Should run the whole pipeline on the live manifest and reproduce the baseline") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            assert root.isDirectory() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+            def results = [:]
+            if (workflow.success) {
+                // LOCATE_SCRNA_ARTIFACTS: one artifacts YAML per library, the same as the baseline's
+                def baselineArtifacts = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.sort { it.name }
+                baselineArtifacts.each { baseline ->
+                    def generated = file("${params.outdir}/locate/artifacts/${baseline.name}")
+                    results["artifacts/${baseline.name}"] = generated.exists() && compare("artifacts/${baseline.name}", generated, baseline)
+                }
+                results['artifacts: no extra libraries'] =
+                    file("${params.outdir}/locate/artifacts").listFiles().findAll { it.name.endsWith('.yaml') }*.name.sort() == baselineArtifacts*.name
+            }
+            def resolvedColumns = ['library_id', 'dge', 'cell_metadata', 'mmc_model', 'mmc_annotations', 'reduced_gtf']
+            def tsvRows = { File f -> f.readLines().collect { it.split('\t', -1) as List } }
+            def selected = { rows -> rows.drop(1).collect { r -> resolvedColumns.collectEntries { c -> [(c): r[rows[0].indexOf(c)]] } } }
+            def resolvedFiles = []
+            if (workflow.success) {
+                // RESOLVE_LIBRARIES: the summary is in the task directory only, and has the baseline's libraries, DGEs, metadata, model and GTF
+                // nf-test gives each run its own directory with output/ and work/ side by side
+                new File(new File("${outputDir}".toString()).parentFile, 'work').eachFileRecurse { if (it.name.endsWith('.resolved_libraries.tsv')) resolvedFiles << it }
+                results['resolved_libraries.tsv: exactly one, in the work directory'] = resolvedFiles.size() == 1
+                if (resolvedFiles.size() == 1) {
+                    def baselineRows = selected(tsvRows(new File(root, 'resolved_manifest/libraries.tsv')))
+                    results['resolved_libraries.tsv: same libraries as the baseline'] = selected(tsvRows(resolvedFiles[0])) == baselineRows
+                }
+                // not published
+                results['resolved_libraries.tsv: not published'] = !file("${params.outdir}/resolve").exists() &&
+                    !new File("${params.outdir}").listFiles().any { it.name.contains('resolved_libraries') }
+            }
+            assertAll(
+                { assert workflow.success },
+                { assert results.findAll { !it.value }.isEmpty() : "outputs differing from the baseline: ${results.findAll { !it.value }.keySet()}" }
+            )
+        }
+    }
+}

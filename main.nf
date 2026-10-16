@@ -28,7 +28,8 @@ include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_scrn
 workflow MCCARROLL_SCRNA_AGGREGATION {
 
     take:
-    samplesheet // channel: samplesheet read in from --input
+    manifest // value channel: tuple val(meta), path(manifest); meta.id is the analysis id
+    entries  // value channel: list of manifest entries, in manifest order
 
     main:
 
@@ -36,7 +37,8 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     // WORKFLOW: Run pipeline
     //
     SCRNA_AGGREGATION (
-        samplesheet
+        manifest,
+        entries
     )
 }
 /*
@@ -57,7 +59,8 @@ workflow {
         params.monochrome_logs,
         args,
         params.outdir,
-        params.input,
+        params.manifest,
+        params.analysis_id,
         params.help,
         params.help_full,
         params.show_hidden
@@ -67,7 +70,8 @@ workflow {
     // WORKFLOW: Run main workflow
     //
     MCCARROLL_SCRNA_AGGREGATION (
-        PIPELINE_INITIALISATION.out.samplesheet
+        PIPELINE_INITIALISATION.out.manifest,
+        PIPELINE_INITIALISATION.out.entries
     )
     //
     // SUBWORKFLOW: Run completion tasks

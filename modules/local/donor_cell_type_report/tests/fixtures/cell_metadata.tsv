@@ -1,0 +1,8 @@
+PREFIX	cell_barcode	num_retained_transcripts	donor	M_class_name
+LIB_A	AAAA	100	D1	Glut
+LIB_A	CCCC	10	D2	GABA
+LIB_A	GGGG	200	D1	Glut
+LIB_B	AAAA	50	D1	GABA
+LIB_B	CCCC	25	D2	GABA
+LIB_B	GGGG	400	D1	Glut
+LIB_B	TTTT	7	D2	Glut

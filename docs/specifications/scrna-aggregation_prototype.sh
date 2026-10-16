@@ -188,6 +188,11 @@ for i in "${!LIBRARIES[@]}"; do
     --set-first --set PREFIX "$library" ${join_args[@]+"${join_args[@]}"} ${manifest_args[@]+"${manifest_args[@]}"}
   LIBRARY_METADATA_FILES+=("$OUT_DIR/$library.joined_filtered_cell_metadata.txt")
 done
+# The cell type column chosen above (the same for all libraries), used by the donor / cell type report and metacells.
+# Written only if there are MapMyCells results, so its absence means there is no cell type column.
+if [[ -n $CELL_TYPE_COLUMN ]]; then
+  echo "$CELL_TYPE_COLUMN" > "$PREFIX.cell_type_column.txt"
+fi
 
 # ---------------------------------------------------------------------------------------------------------------
 # 4. Write the MakeTripletDge manifest
