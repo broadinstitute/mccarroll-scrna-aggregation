@@ -13,8 +13,10 @@ nextflow_function {
     //     with a uei and a user_dge.
     //   resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options): entries from AggregationManifest.parse, artifacts from
     //     loadArtifact, options [reference: String|null, mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
-    //     reducedGtf, reference]; a record is [libraryId, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
-    //   summaryText(result): the content of <analysis>.resolved_libraries.tsv.
+    //     reducedGtf, reference, analysisId, hasDonors]; a record is [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
+    //     The DGE of a library is the one the manifest names (the artifact's user_dge), whatever its type. A library has donors if its manifest entry
+    //     names a donor or its artifacts have a village (village_properties); hasDonors is true if all have, and a mix is an error.
+    //   summaryText(result): the plain text of <analysis>.resolved_libraries.txt, for a person to read (never parsed back).
     // Errors are IllegalArgumentException naming the library or DGE. The expectations follow dropseq's resolve_aggregation_manifest, except the
     // checks that are new: the same user_dge in two artifacts, different MapMyCells models, and staged file names that collide with the task's.
 
@@ -27,7 +29,7 @@ nextflow_function {
         }
     }
     // The artifact of a library as LOCATE writes it, with only the fields the resolver reads; overrides replace fields (use 'NA' for none).
-    // LIB_x has a donor (village) DGE, a selected-cells DGE and the model MODEL1.
+    // LIB_x has a donor (village) DGE (the one its manifest entry names), a selected-cells DGE and the model MODEL1.
     def artifact = { String uei, Map overrides = [:] ->
         def sa = "/data/${uei}/REF/standard_analysis"
         def dataset = [
@@ -40,6 +42,7 @@ nextflow_function {
             dge_selected_cells: "${sa}/${uei}.selected.digital_expression.txt.gz",
             dge_donors: "${sa}/village/V1/${uei}.donors.digital_expression.txt.gz",
             cell_metadata: "${sa}/village/V1/${uei}.cmd.tsv",
+            village_properties: "${sa}/village/V1/${uei}.village.properties",
             mmc: [MODEL1: [mmc_annotations: "${sa}/mmc/MODEL1/${uei}.csv", mmc_json: 'NA']]
         ] + overrides
         [datasets: [dataset]]
@@ -64,8 +67,8 @@ nextflow_function {
 
         then {
             def a = artifact('LIB_A')
-            // LIB_B has no donor DGE: its user_dge is the selected-cells DGE
-            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', dge_donors: 'NA'])
+            // LIB_B is named by its selected-cells DGE although it also has a donor DGE: the DGE of the library is the one the manifest names
+            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz'])
             def c = artifact('LIB_C')
             def entries = AggregationManifest.parse("""
                 dges:
@@ -80,11 +83,13 @@ nextflow_function {
             assertAll(
                 { assert function.success },
                 { assert libs.keySet() as List == ['LIB_B', 'LIB_A'] },
-                // the donor DGE is preferred; LIB_B only has the selected-cells one
+                // the DGE of each library is the one the manifest names: the donor DGE for LIB_A, the selected-cells one for LIB_B (not its donor DGE)
                 { assert libs.LIB_A.dge == '/data/LIB_A/REF/standard_analysis/village/V1/LIB_A.donors.digital_expression.txt.gz' },
                 { assert libs.LIB_B.dge == '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz' },
                 { assert libs.LIB_A.cellMetadata == '/data/LIB_A/REF/standard_analysis/village/V1/LIB_A.cmd.tsv' },
                 { assert libs.LIB_B.libraryId == 'LIB_B' },
+                // the position in the manifest (0-based): the order in which the libraries are merged, whatever the order of the artifacts
+                { assert libs.LIB_B.position == 0 && libs.LIB_A.position == 1 },
                 // arguments and files of the entry; the donor comes from the manifest
                 { assert libs.LIB_B.args == ['--set', 'donor', 'N1', '--join', 'extra.tsv', 'cell_barcode', 'cell'] },
                 { assert libs.LIB_B.files == ['/data/extra.tsv'] },
@@ -210,7 +215,7 @@ nextflow_function {
         }
     }
 
-    test("Should reject mixed references and reduced GTFs, and a library with no DGE, cell metadata or reduced GTF") {
+    test("Should reject mixed references and reduced GTFs, and a library with no cell metadata or reduced GTF") {
 
         when {
             function {
@@ -232,8 +237,6 @@ nextflow_function {
             def mixedGtf = failure { resolve(entriesFor([a, otherGtf]), [a, otherGtf]) }
             def noGtf = artifact('LIB_B', [reduced_gtf: 'NA'])
             def missingGtf = failure { resolve(entriesFor([a, noGtf]), [a, noGtf]) }
-            def noDge = artifact('LIB_B', [dge_donors: 'NA', dge_selected_cells: 'NA'])
-            def missingDge = failure { resolve(entriesFor([a, noDge]), [a, noDge]) }
             def noMetadata = artifact('LIB_B', [cell_metadata: 'NA'])
             def missingMetadata = failure { resolve(entriesFor([a, noMetadata]), [a, noMetadata]) }
             assertAll(
@@ -243,7 +246,6 @@ nextflow_function {
                 { assert fallback.reference == 'REF_DIR' },
                 { assert mixedGtf != null && mixedGtf.toLowerCase().contains('gtf') && mixedGtf.contains('OTHER.reduced.gtf') },
                 { assert missingGtf != null && missingGtf.toLowerCase().contains('gtf') && missingGtf.contains('LIB_B') },
-                { assert missingDge != null && missingDge.contains('LIB_B') && missingDge.toLowerCase().contains('dge') },
                 { assert missingMetadata != null && missingMetadata.contains('LIB_B') && missingMetadata.toLowerCase().contains('cell metadata') }
             )
         }
@@ -312,7 +314,7 @@ nextflow_function {
         }
     }
 
-    test("Should write the resolved libraries summary with one row per library and NA for no files") {
+    test("Should write the summary as plain text: the run's reference and GTF, then the DGE, files and arguments of each library in manifest order") {
 
         when {
             function {
@@ -324,25 +326,133 @@ nextflow_function {
 
         then {
             def a = artifact('LIB_A')
-            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', dge_donors: 'NA', mmc: 'NA'])
+            // LIB_B: no MapMyCells results, no extra files; named by its selected-cells DGE
+            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', mmc: 'NA'])
             def entries = AggregationManifest.parse("""
                 dges:
                   - dge: ${a.datasets[0].user_dge}
                     joins: {joinFile: /data/extra.tsv, leftColumn: x, joinColumn: y}
-                    filters: {c: {includeFile: "gs://b/keep.txt"}}
+                    filters: {c: {includeFile: "gs://b/keep.txt"}, d: {include: ['a b']}}
                   - dge: ${b.datasets[0].user_dge}
                     donor: N1
             """.stripIndent())
-            def lines = LibraryResolver.summaryText(resolve(entries, [a, b])).readLines().collect { it.split('\t', -1) as List }
+            def text = LibraryResolver.summaryText(resolve(entries, [a, b]))
+            def indent = ' ' * 17
+            def expected = [
+                'Aggregation analysis1',
+                'Reference:   /ref/REF.fasta.gz',
+                'Reduced GTF: /ref/REF.reduced.gtf',
+                'Donors:      yes',
+                '',
+                'Library LIB_A',
+                '  DGE:           /data/LIB_A/REF/standard_analysis/village/V1/LIB_A.donors.digital_expression.txt.gz',
+                '  Cell metadata: /data/LIB_A/REF/standard_analysis/village/V1/LIB_A.cmd.tsv',
+                '  MapMyCells:    model MODEL1, annotations /data/LIB_A/REF/standard_analysis/mmc/MODEL1/LIB_A.csv',
+                '  Extra files:   /data/extra.tsv',
+                indent + 'gs://b/keep.txt',
+                '  join_and_filter_tsv arguments (one per line, as in LIB_A.join_and_filter_args.txt):'
+            ] + ['--join', 'extra.tsv', 'x', 'y', '--include-file', 'c', 'keep.txt', '--include', 'd', 'a b'].collect { indent + it } + [
+                '',
+                'Library LIB_B',
+                '  DGE:           /data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz',
+                '  Cell metadata: /data/LIB_B/REF/standard_analysis/village/V1/LIB_B.cmd.tsv',
+                '  MapMyCells:    none',
+                '  Extra files:   none',
+                '  join_and_filter_tsv arguments (one per line, as in LIB_B.join_and_filter_args.txt):',
+                indent + '--set',
+                indent + 'donor',
+                indent + 'N1'
+            ]
             assertAll(
                 { assert function.success },
-                { assert lines[0] == ['library_id', 'dge', 'cell_metadata', 'mmc_model', 'mmc_annotations', 'reduced_gtf', 'args_file', 'files'] },
-                { assert lines.size() == 3 },
-                { assert lines[1] == ['LIB_A', a.datasets[0].user_dge, '/data/LIB_A/REF/standard_analysis/village/V1/LIB_A.cmd.tsv', 'MODEL1',
-                    '/data/LIB_A/REF/standard_analysis/mmc/MODEL1/LIB_A.csv', '/ref/REF.reduced.gtf', 'LIB_A.join_and_filter_args.txt',
-                    '/data/extra.tsv;gs://b/keep.txt'] },
-                { assert lines[2][0] == 'LIB_B' && lines[2][3] == 'NA' && lines[2][4] == 'NA' && lines[2][6] == 'LIB_B.join_and_filter_args.txt' && lines[2][7] == 'NA' },
-                { assert LibraryResolver.summaryText(resolve(entries, [a, b])).endsWith('\n') }
+                { assert text == expected.collect { it + '\n' }.join('') }
+            )
+        }
+    }
+
+    test("Should write a library with no arguments and no files as none, and end every line with a line break") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def a = artifact('LIB_A')
+            def text = LibraryResolver.summaryText(resolve(entriesFor([a]), [a]))
+            def lines = text.readLines()
+            assertAll(
+                { assert function.success },
+                { assert text.endsWith('\n') && !text.endsWith('\n\n') },
+                { assert lines[-2].startsWith('  join_and_filter_tsv arguments') },
+                { assert lines[-1] == ' ' * 17 + 'none' },
+                { assert lines.contains('  Extra files:   none') }
+            )
+        }
+    }
+
+    test("Should know from the manifest and the artifacts whether the libraries have donors, and reject a mix") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            // a village in the artifacts, or a donor in the manifest (a library that is not a village), makes a library have donors
+            def village = { String uei -> artifact(uei) }
+            def single = { String uei -> artifact(uei, [village_properties: 'NA']) }
+            def a = village('LIB_A'); def b = village('LIB_B')
+            def villages = resolve(entriesFor([a, b]), [a, b])
+            def s1 = single('LIB_A'); def s2 = single('LIB_B')
+            def noDonors = resolve(entriesFor([s1, s2]), [s1, s2])
+            def donorInManifest = resolve(AggregationManifest.parse("dges:\n  - dge: ${s1.datasets[0].user_dge}\n    donor: N1\n  - dge: ${s2.datasets[0].user_dge}\n    donor: N2\n"), [s1, s2])
+            // one village and one library with neither
+            def mixed = failure { resolve(entriesFor([a, s2]), [a, s2]) }
+            // one library with a donor in the manifest and one with neither
+            def mixedManifest = failure { resolve(AggregationManifest.parse("dges:\n  - dge: ${s1.datasets[0].user_dge}\n    donor: N1\n  - dge: ${s2.datasets[0].user_dge}\n"), [s1, s2]) }
+            assertAll(
+                { assert function.success },
+                { assert villages.hasDonors && villages.libraries.values().every { it.hasDonor } },
+                { assert !noDonors.hasDonors && noDonors.libraries.values().every { !it.hasDonor } },
+                { assert donorInManifest.hasDonors },
+                // the message names the libraries with and without donors
+                { assert mixed != null && mixed.contains('LIB_A') && mixed.contains('LIB_B') && mixed.contains('Without') },
+                { assert mixedManifest != null && mixedManifest.contains('LIB_A') && mixedManifest.contains('LIB_B') },
+                { assert LibraryResolver.summaryText(noDonors).readLines()[3] == 'Donors:      no' }
+            )
+        }
+    }
+
+    test("Should return the one cell type column of the libraries with MapMyCells results, and fail when they differ") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def same = LibraryResolver.checkCellTypeColumn([LIB_A: 'M_neighborhood_name', LIB_B: 'M_neighborhood_name'])
+            def none = LibraryResolver.checkCellTypeColumn([:])
+            def message = failure { LibraryResolver.checkCellTypeColumn([LIB_A: 'M_class_name', LIB_B: 'M_neighborhood_name']) }
+            assertAll(
+                { assert function.success },
+                { assert same == 'M_neighborhood_name' },
+                // no library has results: no column, no error
+                { assert none == null },
+                // the message names both libraries and both columns
+                { assert message != null },
+                { assert message.contains('LIB_A') && message.contains('LIB_B') },
+                { assert message.contains('M_class_name') && message.contains('M_neighborhood_name') }
             )
         }
     }
