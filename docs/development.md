@@ -7,14 +7,15 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
 
 - Leaf-first, test-driven: each module is built and tested on its own before it is wired into the workflow.
 - Test conventions (file layout, names, file layout) are in [testing.md](testing.md).
-- Tool containers are parameters (`--python_image`, `--java_image`, `--image_tag`, default `jn_test`). Local images must already exist.
+- Tool containers are fixed in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (public images; the tools,
+  including `join_and_filter_tsv --args-file`, were checked in the `current` images). To use another tag, set `container` for a process in a config with `process { withName: 'X' { container = '...' } }`.
 - Run `nextflow lint .` after changing config or Nextflow files; it currently reports no errors (some unused-parameter
   warnings from the template remain). Workflow and include names must be valid identifiers: use underscores
   (`SCRNA_AGGREGATION`), never the hyphens of the pipeline name.
 
 - Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args` (BUILD_LIBRARY_CELL_METADATA is the exception: the manifest's arguments come in a staged args file read with `--args-file`).
-- Java modules: image `${params.java_image}:${params.image_tag}`, JVM heap `(task.memory.toMega() * 0.8) as int` MB, and `--TMP_DIR` in the task
-  directory (the container's default temp dir is not writable). Fixture tests set `params.java_image` to the local image and a small `process.resourceLimits`.
+- Java modules: image `quay.io/broadinstitute/drop-seq_java:current`, JVM heap `(task.memory.toMega() * 0.8) as int` MB, and `--TMP_DIR` in the task
+  directory (the container's default temp dir is not writable). Fixture tests set a small `process.resourceLimits`.
 
 - Shared Groovy for tests lives in `tests/lib/` (`libDir` in `nf-test.config`), for example `LiveFiles.contentMd5` for the live comparisons: put
   repeated test helpers there instead of copying them between test files. (`projectDir` is only visible inside `when`/`then` blocks, not in suite-level closures.)

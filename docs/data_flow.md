@@ -1,8 +1,8 @@
 # Data flow of the first steps
 
 How the manifest, the artifacts and the `join_and_filter_tsv` arguments flow through the first steps of the pipeline, after the manifest / argument /
-resolver work of session 5. Status: the Groovy classes and their tests are done; the inputs (edge 0), LOCATE (edge 1) and RESOLVE_LIBRARIES (edge 2) are wired; **wiring the rest into `workflows/scrna-aggregation.nf` and deleting
-`RESOLVE_AGGREGATION_MANIFEST` are still to do** (marked `[todo]`); `BUILD_LIBRARY_CELL_METADATA` already takes the arguments file.
+resolver work of sessions 5 and 6. Status: the Groovy classes and their tests are done; the inputs (edge 0), LOCATE (1), the library resolver (2, in the workflow), SUMMARIZE + MERGE_LIBRARY_METRICS (3)
+and FORMAT_MAPMYCELLS_ANNOTATIONS + BUILD_LIBRARY_CELL_METADATA (4) are wired; **all steps are wired**; `RESOLVE_AGGREGATION_MANIFEST` has been deleted (replaced by the Groovy `LibraryResolver`).
 
 Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no container, pure functions in `lib/`, unit tested); `==>` a published file.
 
@@ -27,35 +27,52 @@ Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no con
         |                                               |
         v                                               |
  [groovy] map { LibraryResolver.readArtifactTexts(dir) }  (in the workflow; the YAML text of each library)
-        |   passed as val to [process] RESOLVE_LIBRARIES, whose script block runs the [groovy] steps below
+        |   combined with the manifest entries in a head-job map that runs the [groovy] steps below (no process)
         |                                               |
         v                                               v
  [groovy] LibraryResolver.resolve(entries, artifacts, analysis id, [reference, mmcModel])        <- replaces RESOLVE_AGGREGATION_MANIFEST
         |   matches entry.dge = artifact.user_dge; library id = artifact uei
-        |   per library: dge (donor DGE, else selected cells), cellMetadata, mmcModel, mmcAnnotations (NA if none),
+        |   per library: dge (the DGE the manifest names, of any type), cellMetadata, mmcModel, mmcAnnotations (NA if none),
         |                args + files (JoinFilterArguments.build: --set donor, --join..., filters; files = what to stage)
         |   checks: ids unique and != analysis id, one reference, one reduced GTF, same MapMyCells model,
         |           no staged file named like the task's own files
         |  -> libraries{ id -> record }, reducedGtf, reference
         |
-        +--> LibraryResolver.summaryText -> <analysis>.resolved_libraries.tsv  (in the RESOLVE_LIBRARIES work directory; not published)
-                |   splitCsv -> one item per library: [meta(id=library, analysis_id, mmc_model), row]   (ch_libraries; unused so far)
+        +--> LibraryResolver.summaryText -> <analysis>.resolved_libraries.txt ==> pipeline_info/   (plain text for people; nothing reads it back)
         |
-        +--> per library (the library record becomes meta + channel items)
+        +--> flatMap -> one item per library: [meta(id=library, analysis_id, mmc_model), record]   (ch_libraries; record = real Groovy values:
+                |   libraryId, dge, cellMetadata, mmcModel, mmcAnnotations, args (List), files (List))
+        |
+        +--> per library (ch_libraries items; the pieces are joined on the library id)
                |
-               +--> JoinFilterArguments.toArgsFileText(args) (a file in the work directory)     [todo: collectFile; not published]
+               +--> collectFile { JoinFilterArguments.toArgsFileText(record.args) } -> <lib>.join_and_filter_args.txt   (ch_args_files; work directory only, not published)
                |
-               +--> [process] SUMMARIZE_SCRNA_EXPERIMENTS       in: [meta(lib), artifacts/<lib>.yaml] -> <lib>.library_metrics.txt
+               +--> [process] SUMMARIZE_SCRNA_EXPERIMENTS       in: [meta(lib), artifacts/<lib>.yaml] (YAML picked from the artifacts directory by file name = library id)
+               |                                                 -> <lib>.library_metrics.txt (work directory only), tearsheet ==> tearsheets/
+               |                  all libraries, in manifest order (meta.position) -> [process] MERGE_LIBRARY_METRICS -> <analysis>.library_metrics.txt ==> flat in outdir
                |
-               +--> [process] FORMAT_MAPMYCELLS_ANNOTATIONS     only if mmcAnnotations != NA
-               |                in: [meta(lib), mmcAnnotations csv] -> <lib>.mmc.tsv, cell_type_column (string)
+               +--> [process] FORMAT_MAPMYCELLS_ANNOTATIONS     only if mmcAnnotations != NA (ext.args: --column-prefix <model>_ [--level params.mmc_level])
+               |                in: [meta(lib), mmcAnnotations csv] -> <lib>.mmc.tsv (not published), cell_type_column (string)
+               |                all columns -> [groovy] LibraryResolver.checkCellTypeColumn (fails if they differ)
+               |                            -> ch_cell_type_column (value, '' for none; for DONOR_CELL_TYPE_REPORT / metacells [todo])
+               |                            -> <analysis>.cell_type_column.txt ==> flat in outdir
                |
-               +--> [process] BUILD_LIBRARY_CELL_METADATA                                          [done: takes --args-file]
-                                in : cellMetadata, <lib>.mmc.tsv (or none), files (staged by base name), <lib>.join_and_filter_args.txt
+               +--> [process] BUILD_LIBRARY_CELL_METADATA   (work directory only)                            [done: takes --args-file]
+                                in : cellMetadata, <lib>.mmc.tsv (or []), <lib>.join_and_filter_args.txt, files (staged by base name, or [])
                                 cmd: join_and_filter_tsv --input <cmd.tsv> --set-first --set PREFIX <lib> [--join <lib>.mmc.tsv cell_barcode cell_id]
                                        --args-file <lib>.join_and_filter_args.txt
                                 out: <lib>.joined_filtered_cell_metadata.txt
-        ... then MAKE_TRIPLET_DGE, MERGE_LIBRARY_METADATA, DONOR_CELL_TYPE_REPORT, MAKE_METACELLS_FROM_TRIPLET_DGE (unchanged)
+               |
+               +--> ONE list of [library id, meta, cell metadata, DGE (record.dge, the manifest DGE)] per library, sorted by meta.position (manifest order)   (ch_built_sorted)
+                        |--> [process] MERGE_CELL_METADATA (alias of MERGE_LIBRARY_METADATA; --index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt ==> flat in outdir
+                        |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 16 GB)
+                                  -> matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz ==> flat in outdir      [done: edge 5]
+                        |
+                        |  only if resolver.hasDonors (every library has a manifest donor or a village in its artifacts; a mix fails in the resolver)
+                        |--> [process] DONOR_METACELLS (alias of MAKE_METACELLS_FROM_TRIPLET_DGE, group by donor) -> <analysis>.donors.metacells.txt.gz ==> flat
+                        |  and only if there is a cell type column (some library has MapMyCells results)
+                        |--> [process] DONOR_CELL_TYPE_METACELLS (group by donor and the cell type column) -> <analysis>.donor_cell_type.metacells.txt.gz ==> flat
+                        |--> [process] DONOR_CELL_TYPE_REPORT (merged cell metadata, cell type column) -> <analysis>.donor_cell_type.txt ==> flat   [done: edge 6]
 ```
 
 ## How the arguments reached `join_and_filter_tsv`, before and after
@@ -69,11 +86,11 @@ Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no con
 | Donor | read from the artifact (copied there from the manifest by LOCATE) | read from the manifest entry |
 | File paths in the arguments | original paths | staged base names; the originals go in `files` for Nextflow to stage; two files with one base name are rejected |
 | How the arguments reach the tool | `<lib>.join_and_filter_args.txt` written by RESOLVE, expanded by the shell in the prototype | the same file, written by the workflow, read by `join_and_filter_tsv --args-file` (no `ext.args`, no shell quoting) |
-| `libraries.tsv` | RESOLVE output with task-local paths | `LibraryResolver.resolve` result, written by RESOLVE_LIBRARIES as `<analysis>.resolved_libraries.tsv` in its work directory (not published) with the arguments file name instead of a path |
+| `libraries.tsv` | RESOLVE output with task-local paths | `LibraryResolver.resolve` result, kept as Groovy values in the channel; `LibraryResolver.summaryText` writes it as plain text to `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` for people |
 | New checks | | same user_dge in two artifacts; libraries with MapMyCells results of different models (set `mmc_model`); staged files named like `<lib>.mmc.tsv`, the arguments file, the cell metadata or the output |
 
 ## Where to look when something looks wrong
-- What did the YAML become? `<analysis>.resolved_libraries.tsv` (one row per library, in the RESOLVE_LIBRARIES task directory; not published) and `<lib>.join_and_filter_args.txt` (the exact arguments, one per line; not
+- What did the YAML become? `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` (plain text: per library the DGE, cell metadata, MapMyCells result, extra files and arguments) and `<lib>.join_and_filter_args.txt` (the exact arguments, one per line; not
   published, it is the staged input in the work directory of the library's BUILD_LIBRARY_CELL_METADATA task).
 - What did a task run? Its `.command.sh` (shows `--args-file`), and the args file staged next to it.
 - Why was a manifest rejected? The message names the DGE entry, the key and the rule (`tests/manifest.function.nf.test` lists every rule).

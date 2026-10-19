@@ -13,8 +13,8 @@ merged sparse matrix, merged cell metadata, library metrics and donor / cell typ
 --manifest '[path or gs:// URL of the manifest]' --analysis_id '[label of this aggregation]'
 ```
 
-The manifest has a `dges` list (one entry per library) and an optional `dgeDefaults`. An entry has a `dge`, which must be the donor DGE
-(`<uei>.donors.digital_expression.txt.gz`) or the selected-cells DGE (`<uei>.selected...`) of a library, and optionally a `donor`, `filters` and `joins`:
+The manifest has a `dges` list (one entry per library) and an optional `dgeDefaults`. An entry has a `dge`: the DGE of a library that the pipeline processes, exactly as named (for example
+`<uei>.donors.digital_expression.txt.gz` or `<uei>.selected.digital_expression.txt.gz`), and optionally a `donor`, `filters` and `joins`:
 
 ```yaml title="manifest.yaml"
 dgeDefaults:                  # filters and joins projected onto every DGE; an entry's own values win key by key
@@ -36,9 +36,9 @@ Files named in `joinFile`, `includeFile` and `excludeFile` use absolute paths (l
 arguments of each step is diagrammed in [data_flow.md](data_flow.md).
 
 Optional parameters: `--reference` skips the check that all libraries have the same reference (the value is the reference name); `--mmc_model` chooses the
-MapMyCells model instead of each library's first one (the libraries that have MapMyCells results must all use the same model). The libraries are resolved
-in the `RESOLVE_LIBRARIES` task, which fails with the reason if they cannot be aggregated together; its `<analysis>.resolved_libraries.tsv` (what each manifest
-entry resolved to) is not published but stays in the task's work directory for inspection.
+MapMyCells model instead of each library's first one (the libraries that have MapMyCells results must all use the same model); `--mmc_level` names the MapMyCells taxonomy level of the cell type column (default: the top level; all libraries must end up with the same column). The libraries are resolved
+by the workflow right after the artifacts are located; the run stops with the reason if they cannot be aggregated together. `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`
+is a plain-text record of what each manifest entry resolved to: the DGE, cell metadata, MapMyCells result, extra files and `join_and_filter_tsv` arguments of every library.
 
 ## Running the pipeline
 

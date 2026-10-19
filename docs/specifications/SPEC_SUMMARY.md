@@ -15,15 +15,13 @@ donor x cell-type metacells.
 | --analysis-id | prefix of aggregate output files | params.analysis_id |
 | --out-dir | output dir | params.outdir |
 | --tmp-dir | scratch | not needed (Nextflow work dir) |
-| --image-tag | tag of python/java images | params.image_tag (default `current`; tests use `jn_test`) |
+| --image-tag | tag of python/java images | fixed to `current` in each module (override per process in a config) |
 | --mmc-model / --mmc-level / --reference | optional | params.mmc_model / mmc_level / reference |
 | --java-memory | `-m` for Java tools | params.java_memory (default 8g); tie to task.memory |
 
-Containers: python tools `quay.io/broadinstitute/drop-seq_python:<tag>`; java tools
-`us.gcr.io/mccarroll-scrna-seq/drop-seq_private_java:<tag>`. (The prototype's python image is the public one; a
-`drop-seq_private_python:jn_test` image also exists locally; the prototype does not use it.) Both registry host and tag
-must be params. Note `docker.registry = 'quay.io'` in nextflow.config only prefixes images with no host, so it does not
-rewrite these fully-qualified names, but review before GCP.
+Containers: python tools `quay.io/broadinstitute/drop-seq_python:current`; java tools `quay.io/broadinstitute/drop-seq_java:current` (both public; the
+prototype used the private Java image, but the public `current` one has `MakeTripletDge` and `MakeMetacellsFromTripletDge`). The names and tag are hard coded in the
+modules. Note `docker.registry = 'quay.io'` in nextflow.config only prefixes images with no host, so it does not rewrite these fully-qualified names.
 Credentials: prototype mounts ADC and copies gs:// on the host. In Nextflow, gs:// paths staged natively on GCP; tools
 that read gs:// themselves (locate_scRNA_artifacts, summarize_scRNA_experiments reading artifact URLs) need credentials
 in the container (open question Q2).
@@ -79,7 +77,7 @@ The original validated run, kept for reference and never modified, is in `/Users
 | Step | Module |
 |---|---|
 | 1a | LOCATE_SCRNA_ARTIFACTS |
-| 1b | RESOLVE_AGGREGATION_MANIFEST |
+| 1b | RESOLVE_AGGREGATION_MANIFEST in the prototype; in the workflow `LibraryResolver` (Groovy, head job; the library's DGE is the manifest DGE) |
 | 2a | SUMMARIZE_SCRNA_EXPERIMENTS |
 | 2b, 6 | MERGE_LIBRARY_METADATA (twice: library metrics, cell metadata) |
 | 3b | FORMAT_MAPMYCELLS_ANNOTATIONS (tool `convert_mmc_csv`) |
