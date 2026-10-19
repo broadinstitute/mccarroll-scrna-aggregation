@@ -43,10 +43,9 @@ class LibraryResolver {
      * @param analysisId no library id may be the same
      * @param options [reference: reference name that skips the check that all libraries have the same one, mmcModel:
      *   MapMyCells model to use instead of the first model of each library]; either may be null or absent
-     * @return [libraries: Map of library id to record, in manifest order; reducedGtf; reference].  A record is
-     *   [libraryId, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]: the donor DGE if the library has one,
-     *   otherwise the selected-cells DGE; the arguments and files of JoinFilterArguments.build.  mmcAnnotations is
-     *   the csv of the model, or NA, and gates the MapMyCells conversion.
+     * @return [analysisId; hasDonors (all libraries have donors; a mix is an error); libraries: Map of library id to record, in manifest order; reducedGtf; reference].  A record is
+     *   [libraryId, position (0-based, in manifest order), hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]: the DGE is the one the manifest names; the arguments
+     *   and files are those of JoinFilterArguments.build.  mmcAnnotations is the csv of the model, or NA, and gates the MapMyCells conversion.
      */
     static Map resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options = [:]) {
         String mmcModel = options.mmcModel
@@ -80,13 +79,9 @@ class LibraryResolver {
             }
             idsByReference.get(reference, []) << id
 
-            String dge = value(dataset.dge_donors)
-            if (dge == NA) {
-                dge = value(dataset.dge_selected_cells)
-            }
-            if (dge == NA) {
-                throw new IllegalArgumentException("${id} has no DGE (neither dge_donors nor dge_selected_cells in its artifacts)")
-            }
+            // The DGE of the library is the one the manifest names (of any type: donors, selected cells ...), which is the artifact's user_dge.
+            // The other DGEs the artifacts list are not used: the cell metadata selects the cells of the DGE later.
+            String dge = entry.dge
             String cellMetadata = value(dataset.cell_metadata)
             if (cellMetadata == NA) {
                 throw new IllegalArgumentException("${id} has no cell metadata in its artifacts")
@@ -96,9 +91,13 @@ class LibraryResolver {
             String model = mmcModel ?: (mmc.isEmpty() ? NA : mmc.keySet().first().toString())
             String annotations = mmc[model] instanceof Map ? value(((Map) mmc[model]).mmc_annotations) : NA
 
+            // A library has donors if the manifest names its donor (a library that is not a village) or its artifacts have a village stage
+            // (donor assignment, whose cell metadata holds the donor of each cell). Known here, so nothing needs to look in the files later.
+            boolean hasDonor = entry.donor != null || value(dataset.village_properties) != NA
+
             Map built = JoinFilterArguments.build(entry)
             checkStagedNames(id, cellMetadata, built.files)
-            libraries[id] = [libraryId: id, dge: dge, cellMetadata: cellMetadata, mmcModel: model, mmcAnnotations: annotations,
+            libraries[id] = [libraryId: id, position: libraries.size(), hasDonor: hasDonor, dge: dge, cellMetadata: cellMetadata, mmcModel: model, mmcAnnotations: annotations,
                              args: built.args, files: built.files, reducedGtf: value(dataset.reduced_gtf)]
         }
 
@@ -135,26 +134,62 @@ class LibraryResolver {
                 "The libraries have MapMyCells results of different models: ${modelByLibrary}.  Set the mmc_model parameter to choose one.")
         }
 
+        // The libraries are merged into one cell metadata table and one matrix, so they must all have donors or none of them.
+        List<String> withDonors = libraries.values().findAll { it.hasDonor }*.libraryId
+        List<String> withoutDonors = libraries.values().findAll { !it.hasDonor }*.libraryId
+        if (withDonors && withoutDonors) {
+            throw new IllegalArgumentException(
+                "Either all libraries have donors or none do.  With donors (a donor in the manifest or a village in the artifacts): ${withDonors}.  " +
+                "Without: ${withoutDonors}.")
+        }
+
         libraries.values().each { it.remove('reducedGtf') }
-        return [libraries: libraries, reducedGtf: gtfs.first(), reference: reference]
+        return [analysisId: analysisId, hasDonors: !withDonors.isEmpty(), libraries: libraries, reducedGtf: gtfs.first(), reference: reference]
     }
 
-    /** @return the name of the arguments file of a library, which is also the name it is published under */
+    /** @return the name of the arguments file of a library */
     static String argsFileName(String libraryId) {
         return "${libraryId}.join_and_filter_args.txt"
     }
 
     /**
-     * @return the content of the resolved libraries summary, tab-separated with a header, one row per library; the staged
-     *   files are separated by ';'
+     * @return the resolved libraries as plain text for a person to read (it is never parsed back): the run's reference and reduced GTF, then
+     *   for each library, in manifest order, the files it will be processed from and the arguments it is filtered with
      */
     static String summaryText(Map result) {
-        List<String> lines = [['library_id', 'dge', 'cell_metadata', 'mmc_model', 'mmc_annotations', 'reduced_gtf', 'args_file', 'files'].join('\t')]
+        String indent = ' ' * 17
+        List<String> lines = [
+            "Aggregation ${result.analysisId}",
+            "Reference:   ${result.reference}",
+            "Reduced GTF: ${result.reducedGtf}",
+            "Donors:      ${result.hasDonors ? 'yes' : 'no'}"
+        ]
         result.libraries.each { String id, Map lib ->
-            lines << [id, lib.dge, lib.cellMetadata, lib.mmcModel, lib.mmcAnnotations, result.reducedGtf, argsFileName(id),
-                      lib.files ? lib.files.join(';') : NA].join('\t')
+            lines << ''
+            lines << "Library ${id}"
+            lines << "  DGE:           ${lib.dge}"
+            lines << "  Cell metadata: ${lib.cellMetadata}"
+            lines << (lib.mmcAnnotations == NA ?
+                "  MapMyCells:    none" : "  MapMyCells:    model ${lib.mmcModel}, annotations ${lib.mmcAnnotations}")
+            lines << "  Extra files:   ${lib.files ? lib.files.join('\n' + indent) : 'none'}"
+            lines << "  join_and_filter_tsv arguments (one per line, as in ${argsFileName(id)}):"
+            lines << (lib.args ? lib.args.collect { indent + it }.join('\n') : indent + 'none')
         }
         return lines.collect { it + '\n' }.join('')
+    }
+
+    /**
+     * @param columnByLibrary the cell type column name returned by FORMAT_MAPMYCELLS_ANNOTATIONS for each library that has MapMyCells results
+     * @return the one column name they all share, or null if there are no such libraries
+     * @throws IllegalArgumentException if the libraries have different columns (they are merged into one column)
+     */
+    static String checkCellTypeColumn(Map<String, String> columnByLibrary) {
+        Set<String> columns = columnByLibrary.values().toSet()
+        if (columns.size() > 1) {
+            throw new IllegalArgumentException(
+                "The libraries have different cell type columns: ${columnByLibrary}.  Set the mmc_level and mmc_model parameters so they agree.")
+        }
+        return columns ? columns.first() : null
     }
 
     /** @return the one dataset of an artifact file, after checking that it has a uei and a user_dge */

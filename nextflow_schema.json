@@ -44,29 +44,17 @@
                     "help_text": "The libraries that have MapMyCells results must all use the same model, because their cell type columns are merged.",
                     "fa_icon": "fas fa-sitemap"
                 },
+                "mmc_level": {
+                    "type": "string",
+                    "description": "MapMyCells taxonomy level that names the cell type column (default: the top level of the taxonomy).",
+                    "help_text": "All libraries with MapMyCells results must end up with the same cell type column.",
+                    "fa_icon": "fas fa-layer-group"
+                },
                 "outdir": {
                     "type": "string",
                     "format": "directory-path",
                     "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
                     "fa_icon": "fas fa-folder-open"
-                },
-                "python_image": {
-                    "type": "string",
-                    "description": "Docker image (registry/name, without tag) for the Python Drop-seq tools.",
-                    "default": "quay.io/broadinstitute/drop-seq_python",
-                    "fa_icon": "fab fa-docker"
-                },
-                "java_image": {
-                    "type": "string",
-                    "description": "Docker image (registry/name, without tag) for the private Java Drop-seq tools.",
-                    "default": "us-docker.pkg.dev/mccarroll-scrna-seq/us.gcr.io/drop-seq_private_java",
-                    "fa_icon": "fab fa-docker"
-                },
-                "image_tag": {
-                    "type": "string",
-                    "description": "Tag of the Drop-seq tool images, so the whole workflow is pinned to one version.",
-                    "default": "jn_test",
-                    "fa_icon": "fas fa-tag"
                 },
                 "gcp_credentials_file": {
                     "type": "string",
