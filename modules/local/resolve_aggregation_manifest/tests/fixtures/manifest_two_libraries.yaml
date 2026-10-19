@@ -1,4 +1,0 @@
-dges:
-  - dge: /fixtures/LIB_A/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_A.donors.digital_expression.txt.gz
-  - dge: /fixtures/LIB_B/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_B.selected.digital_expression.txt.gz
-    donor: N1
