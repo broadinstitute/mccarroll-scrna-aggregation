@@ -1,7 +1,6 @@
 # TODO / status
 
-Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; docs updated, no pipeline code changed). Branch `jn_initial_module_work`; last commit `ab0f491`. **NOTHING from sessions 4 to 6 is committed** (56 changed or
-untracked paths: the modules, the manifest / argument / resolver Groovy in `lib/`, the whole workflow wiring, the tests and the docs). Commit only when the user asks.
+Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; docs updated, no pipeline code changed). Branch `jn_initial_module_work`. Sessions 4 to 7 are committed (6 commits after `ab0f491`, not pushed). Commit only when the user asks.
 
 ## 1. Where we are
 
@@ -18,9 +17,8 @@ untracked paths: the modules, the manifest / argument / resolver Groovy in `lib/
 
 ## 2. Follow-up TODO (roughly in priority order)
 
-### A. Commit the work (user decides when)
-Nothing is committed since `ab0f491`. `git status` shows 56 paths. Suggested logical pieces: (1) `lib/` Groovy + function tests, (2) modules and their tests, (3) workflow, `conf/`,
-`nextflow.config`, schema, (4) pipeline tests, (5) docs. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories first.
+### A. Commit the work (done in session 7)
+Committed in 6 groups (old resolver modules removed, modules, workflow/config/resolver, tests, Batch checks, docs). Not pushed. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories before the next commit.
 
 ### B. Nextflow language: strict syntax and static typing (NEW, user request)
 The user wants the pipeline to use the current Nextflow language (strict syntax) and potentially static typing.
