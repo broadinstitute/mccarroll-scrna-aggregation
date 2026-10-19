@@ -1,0 +1,9 @@
+--set
+donor
+N1
+--max
+pct_mt
+0.1
+--exclude
+M_class_name
+GABA

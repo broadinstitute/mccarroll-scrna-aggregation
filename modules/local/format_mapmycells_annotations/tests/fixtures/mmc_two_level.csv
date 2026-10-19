@@ -1,0 +1,7 @@
+# metadata = LIB_A.json
+# taxonomy hierarchy = ["class", "subclass"]
+# algorithm: 'hierarchical'; codebase: http://github.com/AllenInstitute/cell_type_mapper; version: 1.6.1
+cell_id,class_label,class_name,class_bootstrapping_probability,subclass_label,subclass_name,subclass_bootstrapping_probability
+AAAA,c1,Glut,0.9000,s1,L2/3 IT,0.8000
+CCCC,c2,GABA,0.5000,s2,Vip,0.4000
+GGGG,c1,Glut,0.7000,s3,L5 IT,0.6000

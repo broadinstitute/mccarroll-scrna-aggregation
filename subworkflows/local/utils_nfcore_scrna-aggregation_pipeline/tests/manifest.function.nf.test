@@ -1,0 +1,414 @@
+nextflow_function {
+
+    name "Test aggregation manifest parsing"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    function "loadAggregationManifest"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'manifest'
+
+    // Contract: AggregationManifest.parse(String yamlText) (lib/AggregationManifest.groovy), called directly by these tests, returns one map per
+    // DGE in manifest order: [dge: String, donor: Object|null, filters: Map column -> spec, joins: List<Map>] with dgeDefaults projected onto each
+    // entry. A spec holds only the keys that are set: includeFile, excludeFile (Strings), include, exclude (Lists of scalars), min, max (Numbers).
+    // A join is [joinFile, leftColumn, joinColumn] (Strings). Invalid manifests throw IllegalArgumentException with a message naming the problem
+    // (and the DGE entry). The schema and the dgeDefaults projection follow the original Zamboni workflow (ScRnaAggregationManifestKey,
+    // YamlManifestUtil.projectDefaults).
+    // The host is the thin wrapper loadAggregationManifest(String path), which each test runs on a valid manifest first; it needs only to succeed.
+
+    def parse = { String yaml -> AggregationManifest.parse(yaml) }
+    // the message of the IllegalArgumentException for an invalid manifest, or null if it parsed
+    def failure = { String yaml ->
+        try {
+            AggregationManifest.parse(yaml)
+            return null
+        } catch (IllegalArgumentException e) {
+            return e.message
+        }
+    }
+
+    test("Should project the default filters and joins onto entries that do not set them") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def yaml = '''
+                dgeDefaults:
+                  filters:
+                    doublet: {exclude: doublet}
+                    pct_mt: {max: 0.1}
+                  joins:
+                    - {joinFile: /data/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
+                dges:
+                  - dge: gs://b/one.donors.digital_expression.txt.gz
+                  - dge: gs://b/two.donors.digital_expression.txt.gz
+                    donor: N1
+            '''
+            def entries = parse(yaml)
+            def expectedFilters = [doublet: [exclude: ['doublet']], pct_mt: [max: 0.1]]
+            def expectedJoins = [[joinFile: '/data/extra.tsv', leftColumn: 'cell_barcode', joinColumn: 'cell']]
+            // changing one entry must not change the other (no shared state between the projected copies)
+            entries[0].filters.pct_mt.max = 99
+            assertAll(
+                { assert function.success },
+                { assert entries.size() == 2 },
+                // entry order is the manifest order
+                { assert entries*.dge == ['gs://b/one.donors.digital_expression.txt.gz', 'gs://b/two.donors.digital_expression.txt.gz'] },
+                { assert entries*.donor == [null, 'N1'] },
+                { assert entries[1].filters == expectedFilters },
+                { assert entries[1].joins == expectedJoins },
+                { assert entries[0].joins == expectedJoins },
+                { assert parse(yaml)[0].filters == expectedFilters }
+            )
+        }
+    }
+
+    test("Should merge default and entry filters per column and per key, the entry winning") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entries = parse('''
+                dgeDefaults:
+                  filters:
+                    doublet: {exclude: doublet}
+                    pct_mt: {max: 0.1, min: 0.0}
+                    max.prob: {min: 0.8}
+                dges:
+                  - dge: a
+                    filters:
+                      pct_mt: {max: 0.05}
+                      extra: {include: [x, y]}
+                  - dge: b
+                    filters: {doublet: {include: singlet}}
+            ''')
+            assertAll(
+                { assert function.success },
+                // entry a: pct_mt.max overridden, pct_mt.min and the other default columns added, its own column kept
+                { assert entries[0].filters == [
+                    pct_mt: [max: 0.05, min: 0.0], extra: [include: ['x', 'y']], doublet: [exclude: ['doublet']], 'max.prob': [min: 0.8]] },
+                // entry b: the default 'exclude' is added to the entry's own 'include' of the same column
+                { assert entries[1].filters.doublet == [include: ['singlet'], exclude: ['doublet']] },
+                { assert entries[1].filters.pct_mt == [max: 0.1, min: 0.0] }
+            )
+        }
+    }
+
+    test("Should use default joins only for entries without joins, never appending to them") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entries = parse('''
+                dgeDefaults:
+                  joins:
+                    - {joinFile: default.tsv, leftColumn: a, joinColumn: b}
+                dges:
+                  - dge: with_own
+                    joins: {joinFile: own.tsv, leftColumn: c, joinColumn: d}
+                  - dge: without
+            ''')
+            assertAll(
+                { assert function.success },
+                { assert entries[0].joins == [[joinFile: 'own.tsv', leftColumn: 'c', joinColumn: 'd']] },
+                { assert entries[1].joins == [[joinFile: 'default.tsv', leftColumn: 'a', joinColumn: 'b']] }
+            )
+        }
+    }
+
+    test("Should normalize filters to a column-ordered map with list-valued include and exclude") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entries = parse('''
+                dges:
+                  - dge: a
+                    filters:
+                      zeta: {exclude: true}
+                      alpha: {include: [1, 2], min: 3, max: 4.5}
+                      files: {includeFile: /data/in.txt, excludeFile: /data/out.txt}
+                      empty: {}
+                  - dge: b
+            ''')
+            def filters = entries[0].filters
+            assertAll(
+                { assert function.success },
+                // column order is the manifest order
+                { assert filters.keySet() as List == ['zeta', 'alpha', 'files', 'empty'] },
+                // scalars become one-element lists, and the YAML types are kept (boolean, integers, a float)
+                { assert filters.zeta == [exclude: [true]] },
+                { assert filters.alpha == [include: [1, 2], min: 3, max: 4.5] },
+                { assert filters.files == [includeFile: '/data/in.txt', excludeFile: '/data/out.txt'] },
+                { assert filters.empty == [:] },
+                // an entry with no filters has an empty map and no joins an empty list
+                { assert entries[1].filters == [:] },
+                { assert entries[1].joins == [] }
+            )
+        }
+    }
+
+    test("Should reject the list form of filters") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def message = failure('''
+                dges:
+                  - dge: gs://b/one.txt.gz
+                    filters:
+                      - {doublet: {exclude: doublet}}
+            ''')
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('dge entry 1 (gs://b/one.txt.gz)') },
+                { assert message.contains('filters') && message.contains('dictionary keyed by column') }
+            )
+        }
+    }
+
+    test("Should keep the order of joins and accept a single join as a dictionary") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entries = parse('''
+                dges:
+                  - dge: a
+                    joins:
+                      - {joinFile: second.tsv, leftColumn: x, joinColumn: y}
+                      - {joinFile: first.tsv, leftColumn: z, joinColumn: w}
+                  - dge: b
+                    joins: {joinFile: only.tsv, leftColumn: x, joinColumn: y}
+            ''')
+            assertAll(
+                { assert function.success },
+                // the order is the manifest order, not sorted: joins can use the columns of earlier joins
+                { assert entries[0].joins*.joinFile == ['second.tsv', 'first.tsv'] },
+                { assert entries[1].joins == [[joinFile: 'only.tsv', leftColumn: 'x', joinColumn: 'y']] }
+            )
+        }
+    }
+
+    test("Should require joinFile, leftColumn and joinColumn in every join") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def message = failure('''
+                dges:
+                  - dge: gs://b/one.txt.gz
+                    joins:
+                      - {joinFile: ok.tsv, leftColumn: x, joinColumn: y}
+                      - {joinFile: bad.tsv, leftColumn: x}
+            ''')
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('dge entry 1 (gs://b/one.txt.gz)') },
+                { assert message.contains('join 2') && message.contains('joinColumn') }
+            )
+        }
+    }
+
+    test("Should reject structure and type errors with a message naming the problem") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            // [description, yaml, text that the message must contain]
+            def cases = [
+                ['not a dictionary',      '- dge: a', "'dges'"],
+                ['no dges key',           'dgeDefaults: {}', "no 'dges'"],
+                ['empty dges',            'dges: []', 'At least one DGE'],
+                ['unknown top-level key', 'dges: [{dge: a}]\ndgeDefault: {}', "Unexpected key 'dgeDefault' in the manifest"],
+                ['unknown dge key',       'dges: [{dge: a, filter: {}}]', "Unexpected key 'filter' in dge entry 1 (a)"],
+                ['libraryId',             'dges: [{dge: a, libraryId: x}]', 'libraryId'],
+                ['unknown filter key',    'dges: [{dge: a, filters: {c: {minimum: 1}}}]', "Unexpected key 'minimum' in dge entry 1 (a): filter on c"],
+                ['unknown join key',      'dges: [{dge: a, joins: {joinFile: f, leftColumn: l, joinColumn: j, how: left}}]', "Unexpected key 'how'"],
+                ['missing dge',           'dges: [{donor: N1}]', "no 'dge'"],
+                ['dge is a list',         'dges: [{dge: [a]}]', "'dge' must be"],
+                ['entry not a dictionary', 'dges: [a]', 'dge entry 1 must be a dictionary'],
+                ['donor in defaults',     'dgeDefaults: {donor: N1}\ndges: [{dge: a}]', "Unexpected key 'donor' in dgeDefaults"],
+                ['dge in defaults',       'dgeDefaults: {dge: a}\ndges: [{dge: b}]', "Unexpected key 'dge' in dgeDefaults"],
+                ['libraryId in defaults', 'dgeDefaults: {libraryId: a}\ndges: [{dge: b}]', "Unexpected key 'libraryId' in dgeDefaults"],
+                ['bad defaults filters',  'dgeDefaults: {filters: [x]}\ndges: [{dge: b}]', 'dgeDefaults'],
+                ['min is text',           'dges: [{dge: a, filters: {c: {min: low}}}]', "'min' must be a number"],
+                ['max is a list',         'dges: [{dge: a, filters: {c: {max: [1, 2]}}}]', "'max' must be a number"],
+                ['min is boolean',        'dges: [{dge: a, filters: {c: {min: true}}}]', "'min' must be a number"],
+                ['include is a dict',     'dges: [{dge: a, filters: {c: {include: {x: 1}}}}]', "'include' must be"],
+                ['includeFile is a list', 'dges: [{dge: a, filters: {c: {includeFile: [f]}}}]', "'includeFile' must be"],
+                ['spec is not a dict',    'dges: [{dge: a, filters: {c: 5}}]', 'filter on c must be a dictionary'],
+                ['donor is a dict',       'dges: [{dge: a, donor: {x: 1}}]', "'donor' must be"],
+                ['malformed yaml',        'dges: [{dge: a', 'not valid YAML'],
+                ['duplicate yaml key',    'dges: [{dge: a}]\ndges: [{dge: b}]', 'not valid YAML']
+            ]
+            def results = cases.collect { description, yaml, expected ->
+                def message = failure(yaml.stripIndent())
+                [description: description, message: message, ok: message != null && message.contains(expected), expected: expected]
+            }
+            assertAll(
+                { assert function.success },
+                { assert results.findAll { !it.ok }.isEmpty() : "wrong or missing error for: " + results.findAll { !it.ok }.collect { "${it.description} (expected '${it.expected}', got '${it.message}')" } }
+            )
+        }
+    }
+
+    test("Should reject the same DGE listed twice, naming both entries") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def message = failure('''
+                dges:
+                  - dge: gs://b/one.txt.gz
+                  - dge: gs://b/two.txt.gz
+                  - dge: gs://b/one.txt.gz
+            ''')
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('gs://b/one.txt.gz') },
+                { assert message.contains('1') && message.contains('3') && message.contains('more than once') }
+            )
+        }
+    }
+
+    test("Should reject a line break in any value, which cannot be written to the one-argument-per-line arguments file") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            // double-quoted YAML scalars with an escaped newline
+            def cases = [
+                ['donor',        'dges: [{dge: a, donor: "N1\\nN2"}]', 'donor'],
+                ['dge',          'dges: [{dge: "a\\nb"}]', 'dge'],
+                ['joinFile',     'dges: [{dge: a, joins: {joinFile: "f\\ng", leftColumn: l, joinColumn: j}}]', 'joinFile'],
+                ['leftColumn',   'dges: [{dge: a, joins: {joinFile: f, leftColumn: "l\\nm", joinColumn: j}}]', 'leftColumn'],
+                ['include value', 'dges: [{dge: a, filters: {c: {include: ["x", "y\\nz"]}}}]', 'include'],
+                ['exclude value', 'dges: [{dge: a, filters: {c: {exclude: "y\\nz"}}}]', 'exclude'],
+                ['includeFile',  'dges: [{dge: a, filters: {c: {includeFile: "f\\ng"}}}]', 'includeFile'],
+                ['filter column', 'dges: [{dge: a, filters: {"c\\nd": {min: 1}}}]', 'column'],
+                ['default value', 'dgeDefaults: {filters: {c: {exclude: "y\\nz"}}}\ndges: [{dge: a}]', 'exclude']
+            ]
+            def results = cases.collect { description, yaml, expected ->
+                def message = failure(yaml)
+                [description: description, message: message, ok: message != null && message.contains('line break') && message.contains(expected)]
+            }
+            assertAll(
+                { assert function.success },
+                { assert results.findAll { !it.ok }.isEmpty() : "wrong or missing error for: " + results.findAll { !it.ok }.collect { "${it.description} (got '${it.message}')" } }
+            )
+        }
+    }
+
+    test("Should parse the manifests of the live tests, with and without a donor") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def withDonors = parse(new File("${projectDir}/tests/live_data/manifest.yaml").text)
+            def noDonors = parse(new File("${projectDir}/tests/live_data/manifest_no_donors.yaml").text)
+            assertAll(
+                { assert function.success },
+                { assert function.result.size() == 1 },
+                { assert function.result[0].dge.endsWith('SMRI_V11_rxn1.donors.digital_expression.txt.gz') },
+                { assert withDonors.size() == 1 },
+                { assert withDonors[0].dge.startsWith('gs://') && withDonors[0].dge.endsWith('.donors.digital_expression.txt.gz') },
+                { assert withDonors[0].donor == null },
+                { assert withDonors[0].filters == [:] },
+                { assert withDonors[0].joins == [] },
+                { assert noDonors.size() == 1 },
+                { assert noDonors[0].dge.endsWith('.selected.digital_expression.txt.gz') }
+            )
+        }
+    }
+
+    test("Should project the defaults of the original Zamboni workflow's example manifest") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entries = parse(new File("${projectDir}/subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/fixtures/zamboni_aggregation.manifest.yaml").text)
+            assertAll(
+                { assert function.success },
+                { assert entries*.dge == ['starters/src/test/resources/yaml/YamlValidatorTest/emptyFile1', 'starters/src/test/resources/yaml/YamlValidatorTest/emptyFile2'] },
+                // both entries have no filters, so each gets both defaults, in the defaults' order
+                { assert entries.every { it.filters.keySet() as List == ['max.prob', 'doublet'] } },
+                { assert entries.every { it.filters['max.prob'] == [min: 0.8] && it.filters.doublet == [exclude: [true]] } }
+            )
+        }
+    }
+}

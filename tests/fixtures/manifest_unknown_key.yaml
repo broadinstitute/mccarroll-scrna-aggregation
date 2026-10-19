@@ -1,0 +1,4 @@
+# A typo ('filter' for 'filters'): the manifest must be rejected before any process runs.
+dges:
+  - dge: gs://bucket/exp/standard_analysis/SMRI_V11_rxn1.selected.digital_expression.txt.gz
+    filter: {doublet: {exclude: doublet}}

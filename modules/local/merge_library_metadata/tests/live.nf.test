@@ -1,0 +1,107 @@
+nextflow_process {
+
+    name "Test Process MERGE_LIBRARY_METADATA against the baseline"
+    script "modules/local/merge_library_metadata/main.nf"
+    process "MERGE_LIBRARY_METADATA"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "merge_library_metadata"
+    tag "live"
+
+    // Live test: needs Docker and the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no network or credentials.
+    // Merges the baseline's per-library files and compares the result with the baseline's merged file: equal md5s pass; the lines are only compared to report a mismatch.
+    // Libraries come from resolved_manifest/libraries.tsv (manifest order, sorted by library id as the workflow will do).
+    //   library metrics: artifacts/<library>.library_metrics.txt  -> <analysis>.library_metrics.txt
+    //   cell metadata:   <library>.joined_filtered_cell_metadata.txt (--index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt
+
+    // projectDir is only visible inside the when/then blocks, so each block builds the baseline root and passes it in.
+    def baselineLibraries = { File root ->
+        def table = new File(root, 'resolved_manifest/libraries.tsv')
+        assert table.isFile() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+        table.readLines().drop(1).collect { it.split('\t', -1)[0] }.sort()
+    }
+    // the analysis id is the prefix of the baseline's merged library metrics file
+    def baselineAnalysis = { File root ->
+        def f = root.listFiles().find { it.name.endsWith('.library_metrics.txt') }
+        assert f : "no <analysis>.library_metrics.txt in ${root}"
+        f.name - '.library_metrics.txt'
+    }
+    test("Should reproduce the baseline merged library metrics from the per-library metrics") {
+
+        config "./live_library_metrics.config"
+
+        when {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def inputs = baselineLibraries(root).collect { "file('${root}/artifacts/${it}.library_metrics.txt')" }.join(', ')
+            process {
+                """
+                input[0] = [ [ id:'${baselineAnalysis(root)}' ], [ ${inputs} ] ]
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def generated = file(process.out.combined[0][1])
+            def baseline = new File(root, "${baselineAnalysis(root)}.library_metrics.txt")
+            def generatedMd5 = LiveFiles.contentMd5(generated)
+            def same = generatedMd5 == LiveFiles.contentMd5(baseline)
+            def g = same ? [] : generated.readLines()
+            def b = same ? [] : baseline.readLines()
+            def diffs = same ? [] : LiveFiles.differingLines(g, b)
+            def count = diffs.size()
+            def shown = diffs.take(10).collect { i ->
+                "line ${i + 1}: generated=${i < g.size() ? g[i] : '(missing)'} baseline=${i < b.size() ? b[i] : '(missing)'}".toString() }
+            println ""
+            println "Generated: ${generated}"
+            println "Baseline:  ${baseline}"
+            println(same ? "  matches baseline (md5 ${generatedMd5})" : "  differs from the baseline: ${count} differing line(s):")
+            shown.each { println "      ${it}" }
+            assertAll(
+                { assert process.success },
+                { assert generated.name == baseline.name },
+                { assert same : "merged library metrics differ from the baseline" }
+            )
+        }
+    }
+
+    test("Should reproduce the baseline merged cell metadata from the per-library cell metadata") {
+
+        config "./live_cell_metadata.config"
+
+        when {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def inputs = baselineLibraries(root).collect { "file('${root}/${it}.joined_filtered_cell_metadata.txt')" }.join(', ')
+            process {
+                """
+                input[0] = [ [ id:'${baselineAnalysis(root)}' ], [ ${inputs} ] ]
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def generated = file(process.out.combined[0][1])
+            def baseline = new File(root, "${baselineAnalysis(root)}.cell_metadata.txt")
+            def generatedMd5 = LiveFiles.contentMd5(generated)
+            def same = generatedMd5 == LiveFiles.contentMd5(baseline)
+            def g = same ? [] : generated.readLines()
+            def b = same ? [] : baseline.readLines()
+            def diffs = same ? [] : LiveFiles.differingLines(g, b)
+            def count = diffs.size()
+            def shown = diffs.take(10).collect { i ->
+                "line ${i + 1}: generated=${i < g.size() ? g[i] : '(missing)'} baseline=${i < b.size() ? b[i] : '(missing)'}".toString() }
+            println ""
+            println "Generated: ${generated}"
+            println "Baseline:  ${baseline}"
+            println(same ? "  matches baseline (md5 ${generatedMd5})" : "  differs from the baseline: ${count} differing line(s):")
+            shown.each { println "      ${it}" }
+            assertAll(
+                { assert process.success },
+                { assert generated.name == baseline.name },
+                { assert same : "merged cell metadata differ from the baseline" }
+            )
+        }
+    }
+}

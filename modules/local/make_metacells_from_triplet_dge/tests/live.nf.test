@@ -1,0 +1,96 @@
+nextflow_process {
+
+    name "Test Process MAKE_METACELLS_FROM_TRIPLET_DGE against the baseline"
+    script "modules/local/make_metacells_from_triplet_dge/main.nf"
+    process "MAKE_METACELLS_FROM_TRIPLET_DGE"
+    config "./live.config"
+    tag "modules"
+    tag "modules_local"
+    tag "make_metacells_from_triplet_dge"
+    tag "live"
+
+    // Live test: needs Docker and the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no network or credentials.
+    // Runs the tool on the baseline's triplet DGE and merged cell metadata, by donor and by donor and cell type (the column is read
+    // from <analysis>.cell_type_column.txt), and compares each result with the baseline's <analysis>.donors.metacells.txt.gz and
+    // <analysis>.donor_cell_type.metacells.txt.gz. The first line of those files ('#MakeMetacellsFromTripletDge ...') holds the absolute
+    // paths of the run, so it is left out of the comparison; the rest must be identical (md5 first; the lines only to report a mismatch).
+
+    def withoutHeader = { f -> LiveFiles.lines(f).findAll { !it.startsWith('#MakeMetacellsFromTripletDge') } }
+    // the analysis id is the prefix of the baseline's merged cell metadata file
+    def baselineAnalysis = { File root ->
+        def f = root.listFiles()?.find { it.name.endsWith('.cell_metadata.txt') }
+        assert f : "no <analysis>.cell_metadata.txt in ${root} (see docs/testing.md, Live tests)"
+        f.name - '.cell_metadata.txt'
+    }
+    def baselineCellTypeColumn = { File root, String analysis ->
+        def f = new File(root, "${analysis}.cell_type_column.txt")
+        assert f.isFile() : "no ${f.name} in ${root}: remake the baseline with the current prototype script (see docs/testing.md, Live tests)"
+        f.text.trim()
+    }
+    def compare = { generated, baseline ->
+        def g = withoutHeader(generated)
+        def b = withoutHeader(baseline)
+        def diffs = LiveFiles.differingLines(g, b)
+        println ""
+        println "Generated: ${generated}"
+        println "Baseline:  ${baseline}"
+        println(diffs.isEmpty() ? "  matches baseline (ignoring the #MakeMetacellsFromTripletDge line), ${g.size()} lines" :
+            "  differs from the baseline: ${diffs.size()} differing line(s):")
+        diffs.take(10).each { i ->
+            println "      line ${i + 1}: generated=${i < g.size() ? g[i].take(200) : '(missing)'} baseline=${i < b.size() ? b[i].take(200) : '(missing)'}"
+        }
+        diffs.isEmpty()
+    }
+
+    test("Should reproduce the baseline donor metacells") {
+
+        when {
+            // projectDir is only visible inside the when/then blocks, so each block builds the baseline root.
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def analysis = baselineAnalysis(root)
+            process {
+                """
+                input[0] = [ [ id:'${analysis}' ], file('${root}/matrix.mtx.gz'), file('${root}/features.tsv.gz'),
+                    file('${root}/barcodes.tsv.gz'), file('${root}/${analysis}.cell_metadata.txt'), [ 'donor' ] ]
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def analysis = baselineAnalysis(root)
+            def baseline = new File(root, "${analysis}.donors.metacells.txt.gz")
+            def generated = file(process.out.metacells[0][1])
+            assertAll(
+                { assert process.success },
+                // the workflow sets ext.prefix to <analysis>.donors for this call; the module default is meta.id
+                { assert generated.name == "${analysis}.metacells.txt.gz".toString() },
+                { assert compare(generated, baseline) : "donor metacells differ from the baseline" }
+            )
+        }
+    }
+
+    test("Should reproduce the baseline donor by cell type metacells") {
+
+        when {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def analysis = baselineAnalysis(root)
+            def column = baselineCellTypeColumn(root, analysis)
+            process {
+                """
+                input[0] = [ [ id:'${analysis}' ], file('${root}/matrix.mtx.gz'), file('${root}/features.tsv.gz'),
+                    file('${root}/barcodes.tsv.gz'), file('${root}/${analysis}.cell_metadata.txt'), [ 'donor', '${column}' ] ]
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def baseline = new File(root, "${baselineAnalysis(root)}.donor_cell_type.metacells.txt.gz")
+            assertAll(
+                { assert process.success },
+                { assert compare(file(process.out.metacells[0][1]), baseline) : "donor by cell type metacells differ from the baseline" }
+            )
+        }
+    }
+}

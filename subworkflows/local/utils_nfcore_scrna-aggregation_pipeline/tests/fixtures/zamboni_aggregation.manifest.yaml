@@ -1,0 +1,12 @@
+dges:
+- dge: starters/src/test/resources/yaml/YamlValidatorTest/emptyFile1
+- dge: starters/src/test/resources/yaml/YamlValidatorTest/emptyFile2
+
+dgeDefaults:
+  filters:
+    max.prob:
+      min: 0.8
+    doublet:
+      exclude: true
+
+    

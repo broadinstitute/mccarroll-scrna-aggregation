@@ -1,0 +1,13 @@
+datasets:
+- uei: LIB_NA
+  user_dge: NA
+  root_properties: NA
+  pipeline_trace: NA
+  alignment_dir: /fixtures/data/LIB_NA/REF
+  standard_analysis_dir: /fixtures/data/LIB_NA/REF/standard_analysis
+  read_quality_metrics: NA
+  chimeric_metrics: NA
+  selected_cell_metadata: NA
+  selected_cell_barcodes: NA
+  dge_summary_selected_cells: NA
+  cell_selection_report: NA

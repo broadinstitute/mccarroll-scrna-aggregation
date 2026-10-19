@@ -4,58 +4,48 @@
 
 ## Introduction
 
-<!-- TODO nf-core: Add documentation about anything specific to running your pipeline. For general topics, please point to (and add to) the main nf-core website. -->
+The pipeline aggregates the DGEs of several single-library scRNA-seq runs (outputs of the Nextflow scRNA pipeline, on Google Cloud) into one
+merged sparse matrix, merged cell metadata, library metrics and donor / cell type reports and metacells. What to aggregate comes from a YAML manifest.
 
-## Samplesheet input
-
-You will need to create a samplesheet with information about the samples you would like to analyse before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row as shown in the examples below.
+## Manifest input
 
 ```bash
---input '[path to samplesheet file]'
+--manifest '[path or gs:// URL of the manifest]' --analysis_id '[label of this aggregation]'
 ```
 
-### Multiple runs of the same sample
+The manifest has a `dges` list (one entry per library) and an optional `dgeDefaults`. An entry has a `dge`: the DGE of a library that the pipeline processes, exactly as named (for example
+`<uei>.donors.digital_expression.txt.gz` or `<uei>.selected.digital_expression.txt.gz`), and optionally a `donor`, `filters` and `joins`:
 
-The `sample` identifiers have to be the same when you have re-sequenced the same sample more than once e.g. to increase sequencing depth. The pipeline will concatenate the raw reads before performing any downstream analysis. Below is an example for the same sample sequenced across 3 lanes:
-
-```csv title="samplesheet.csv"
-sample,fastq_1,fastq_2
-CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz
-CONTROL_REP1,AEG588A1_S1_L003_R1_001.fastq.gz,AEG588A1_S1_L003_R2_001.fastq.gz
-CONTROL_REP1,AEG588A1_S1_L004_R1_001.fastq.gz,AEG588A1_S1_L004_R2_001.fastq.gz
+```yaml title="manifest.yaml"
+dgeDefaults:                  # filters and joins projected onto every DGE; an entry's own values win key by key
+  filters:
+    doublet: {exclude: doublet}
+dges:
+  - dge: gs://bucket/.../SMRI_V11_rxn1.donors.digital_expression.txt.gz
+  - dge: gs://bucket/.../OTHER.selected.digital_expression.txt.gz
+    donor: N1                 # for a library that is not a village; sets the donor column
+    filters:                  # keyed by cell metadata column
+      pct_mt: {max: 0.1}      # includeFile, excludeFile, include, exclude, min and max are allowed
+    joins:                    # secondary files joined on to the cell metadata, in order
+      - {joinFile: /data/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
 ```
 
-### Full samplesheet
+The manifest is checked before any process starts: unknown keys, wrong types, duplicate DGEs, and files that would be staged under the same name are
+reported with the DGE entry that has the problem. `--analysis_id` prefixes the merged output files and must differ from every library id (its UEI).
+Files named in `joinFile`, `includeFile` and `excludeFile` use absolute paths (local files or `gs://`) and are staged by Nextflow. How the manifest becomes the
+arguments of each step is diagrammed in [data_flow.md](data_flow.md).
 
-The pipeline will auto-detect whether a sample is single- or paired-end using the information provided in the samplesheet. The samplesheet can have as many columns as you desire, however, there is a strict requirement for the first 3 columns to match those defined in the table below.
-
-A final samplesheet file consisting of both single- and paired-end data may look something like the one below. This is for 6 samples, where `TREATMENT_REP3` has been sequenced twice.
-
-```csv title="samplesheet.csv"
-sample,fastq_1,fastq_2
-CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz
-CONTROL_REP2,AEG588A2_S2_L002_R1_001.fastq.gz,AEG588A2_S2_L002_R2_001.fastq.gz
-CONTROL_REP3,AEG588A3_S3_L002_R1_001.fastq.gz,AEG588A3_S3_L002_R2_001.fastq.gz
-TREATMENT_REP1,AEG588A4_S4_L003_R1_001.fastq.gz,
-TREATMENT_REP2,AEG588A5_S5_L003_R1_001.fastq.gz,
-TREATMENT_REP3,AEG588A6_S6_L003_R1_001.fastq.gz,
-TREATMENT_REP3,AEG588A6_S6_L004_R1_001.fastq.gz,
-```
-
-| Column    | Description                                                                                                                                                                            |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample`  | Custom sample name. This entry will be identical for multiple sequencing libraries/runs from the same sample. Spaces in sample names are automatically converted to underscores (`_`). |
-| `fastq_1` | Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
-| `fastq_2` | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
-
-An [example samplesheet](../assets/samplesheet.csv) has been provided with the pipeline.
+Optional parameters: `--reference` skips the check that all libraries have the same reference (the value is the reference name); `--mmc_model` chooses the
+MapMyCells model instead of each library's first one (the libraries that have MapMyCells results must all use the same model); `--mmc_level` names the MapMyCells taxonomy level of the cell type column (default: the top level; all libraries must end up with the same column). The libraries are resolved
+by the workflow right after the artifacts are located; the run stops with the reason if they cannot be aggregated together. `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`
+is a plain-text record of what each manifest entry resolved to: the DGE, cell metadata, MapMyCells result, extra files and `join_and_filter_tsv` arguments of every library.
 
 ## Running the pipeline
 
 The typical command for running the pipeline is as follows:
 
 ```bash
-nextflow run mccarroll/scrna-aggregation --input ./samplesheet.csv --outdir ./results  -profile docker
+nextflow run mccarroll/scrna-aggregation --manifest ./manifest.yaml --analysis_id MY_ANALYSIS --outdir ./results -profile docker
 ```
 
 This will launch the pipeline with the `docker` configuration profile. See below for more information about profiles.
@@ -85,7 +75,8 @@ nextflow run mccarroll/scrna-aggregation -profile docker -params-file params.yam
 with:
 
 ```yaml title="params.yaml"
-input: './samplesheet.csv'
+manifest: './manifest.yaml'
+analysis_id: 'MY_ANALYSIS'
 outdir: './results/'
 <...>
 ```

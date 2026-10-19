@@ -1,0 +1,116 @@
+nextflow_process {
+
+    name "Test Process FORMAT_MAPMYCELLS_ANNOTATIONS"
+    script "modules/local/format_mapmycells_annotations/main.nf"
+    process "FORMAT_MAPMYCELLS_ANNOTATIONS"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "format_mapmycells_annotations"
+
+    // Contract: tuple val(meta), path(csv) -> converted: tuple val(meta), path('<ext.prefix ?: meta.id>.mmc.tsv'),
+    //           cell_type_column: tuple val(meta), val('<prefix><level>_name').
+    // The file-level config sets no ext.args; tests needing --column-prefix/--level name a test-level config.
+    // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
+
+    def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
+
+    test("Should drop # lines, prefix every column except cell_id, and keep rows unchanged") {
+
+        config "./prefix.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                """
+            }
+        }
+
+        then {
+            def lines = tsvLines(process.out.converted[0][1])
+            assertAll(
+                { assert process.success },
+                { assert process.out.converted.size() == 1 },
+                // meta propagated; name from meta.id
+                { assert process.out.converted[0][0] == [ id:'LIB_A' ] },
+                { assert file(process.out.converted[0][1]).name == 'LIB_A.mmc.tsv' },
+                // no '#' lines; header + 3 rows; cell_id unprefixed, all others prefixed
+                { assert lines.size() == 4 },
+                { assert lines[0] == ['cell_id', 'M_class_label', 'M_class_name', 'M_class_bootstrapping_probability',
+                                      'M_subclass_label', 'M_subclass_name', 'M_subclass_bootstrapping_probability'] },
+                // rows in input order; labels unchanged, probabilities re-written by the tool as plain numbers (0.9000 -> 0.9)
+                { assert lines[1] == ['AAAA', 'c1', 'Glut', '0.9', 's1', 'L2/3 IT', '0.8'] },
+                { assert lines[2] == ['CCCC', 'c2', 'GABA', '0.5', 's2', 'Vip', '0.4'] },
+                { assert lines[3] == ['GGGG', 'c1', 'Glut', '0.7', 's3', 'L5 IT', '0.6'] }
+            )
+        }
+    }
+
+    test("Should name the top-level class_name column as the cell type column by default") {
+
+        config "./prefix.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.cell_type_column.size() == 1 },
+                { assert process.out.cell_type_column[0][0] == [ id:'LIB_A' ] },
+                { assert process.out.cell_type_column[0][1] == 'M_class_name' },
+                // the named column exists in the TSV header
+                { assert tsvLines(process.out.converted[0][1])[0].contains('M_class_name') }
+            )
+        }
+    }
+
+    test("Should name the requested level as the cell type column with --level") {
+
+        config "./subclass.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.cell_type_column[0][1] == 'M_subclass_name' },
+                { assert tsvLines(process.out.converted[0][1])[0].contains('M_subclass_name') }
+            )
+        }
+    }
+
+    test("Should fail when --level is not in the taxonomy hierarchy") {
+
+        config "./bad_level.config"
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.failed },
+                { assert process.out.converted.isEmpty() },
+                // the tool names the missing column
+                { assert (process.stdout + process.stderr).join('\n').contains('No M_nope_name column') }
+            )
+        }
+    }
+}

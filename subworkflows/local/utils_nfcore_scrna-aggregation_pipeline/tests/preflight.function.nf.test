@@ -1,0 +1,319 @@
+nextflow_function {
+
+    name "Test pre-flight GCP credentials check"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'preflight'
+
+    // Contract: checkLocalGcpCredentials(String profile, String credentialsFile, String projectId)
+    //   - profile: comma-separated Nextflow profile string, e.g. 'docker,debug'
+    //   - credentialsFile: host path of the GCP credentials JSON mounted into task containers: either gcloud
+    //     Application Default Credentials (type authorized_user) or a service account key (type service_account)
+    //   - projectId: value of the GOOGLE_PROJECT_ID environment variable (null or empty if unset); the Google storage
+    //     client needs a project, which an authorized_user file does not carry but a service_account key does
+    //   - returns nothing; calls error() when the 'docker' profile is active and credentialsFile is not a regular file, or is not a valid credentials JSON
+
+    test("Should fail when the docker profile is active and the credentials file is missing") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                input[0] = 'docker'
+                input[1] = "${outputDir}/missing/application_default_credentials.json"
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.failed },
+                // message names the offending path and the remedy
+                { assert (function.stdout + function.stderr).join('\n').contains("${outputDir}/missing/application_default_credentials.json") },
+                { assert (function.stdout + function.stderr).join('\n').contains('gcloud auth application-default login') }
+            )
+        }
+    }
+
+    test("Should pass when the docker profile is active and the credentials file is a valid authorized_user JSON") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // synthetic stand-in for an authorized_user credentials file (dummy values only)
+                def adc = new File("${outputDir}/adc/application_default_credentials.json")
+                adc.parentFile.mkdirs()
+                adc.text = '{"type": "authorized_user", "client_id": "dummy", "client_secret": "dummy", "refresh_token": "dummy"}'
+                input[0] = 'docker'
+                input[1] = adc.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+    test("Should fail when the docker profile is active and the credentials path is a directory") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // Docker creates a directory at the mount source when the host file is missing
+                def dir = new File("${outputDir}/adc_dir/application_default_credentials.json")
+                dir.mkdirs()
+                input[0] = 'docker'
+                input[1] = dir.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.failed },
+                { assert (function.stdout + function.stderr).join('\n').contains('adc_dir/application_default_credentials.json') }
+            )
+        }
+    }
+
+    test("Should skip the check when the docker profile is not active") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                input[0] = 'test,googlebatch'
+                input[1] = "${outputDir}/missing/application_default_credentials.json"
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+    test("Should detect the docker profile among several comma-separated profiles") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                input[0] = 'test,docker,debug'
+                input[1] = "${outputDir}/missing/application_default_credentials.json"
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.failed },
+                // guards against passing for the wrong reason (e.g. a compile error)
+                { assert (function.stdout + function.stderr).join('\n').contains('gcloud auth application-default login') }
+            )
+        }
+    }
+
+    test("Should pass when the docker profile is active and the credentials file is a valid service_account JSON") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // synthetic stand-in for a service account key (dummy values only)
+                def key = new File("${outputDir}/sa/key.json")
+                key.parentFile.mkdirs()
+                key.text = '{"type": "service_account", "project_id": "dummy", "client_email": "sa@dummy.iam.gserviceaccount.com", "private_key": "dummy"}'
+                input[0] = 'docker'
+                input[1] = key.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+    test("Should fail when the credentials file is not valid JSON") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // an empty or corrupted file
+                def bad = new File("${outputDir}/bad/empty.json")
+                bad.parentFile.mkdirs()
+                bad.text = ''
+                input[0] = 'docker'
+                input[1] = bad.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('not valid JSON') },
+                { assert output.contains('bad/empty.json') }
+            )
+        }
+    }
+
+    test("Should fail when the credentials JSON has an unsupported or missing type") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                def odd = new File("${outputDir}/odd/credentials.json")
+                odd.parentFile.mkdirs()
+                odd.text = '{"type": "external_account", "audience": "dummy"}'
+                input[0] = 'docker'
+                input[1] = odd.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\n')
+            assertAll(
+                { assert function.failed },
+                // names the unsupported type and the accepted ones
+                { assert output.contains("unsupported credential type 'external_account'") },
+                { assert output.contains('authorized_user') },
+                { assert output.contains('service_account') }
+            )
+        }
+    }
+
+    test("Should fail when an authorized_user JSON lacks a required field") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // no refresh_token: the file cannot obtain access tokens
+                def partial = new File("${outputDir}/partial/application_default_credentials.json")
+                partial.parentFile.mkdirs()
+                partial.text = '{"type": "authorized_user", "client_id": "dummy", "client_secret": "dummy"}'
+                input[0] = 'docker'
+                input[1] = partial.absolutePath
+                input[2] = 'dummy-project'
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('refresh_token') }
+            )
+        }
+    }
+
+    test("Should fail when an authorized_user file is used and no project ID is set") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                def adc = new File("${outputDir}/noproject/application_default_credentials.json")
+                adc.parentFile.mkdirs()
+                adc.text = '{"type": "authorized_user", "client_id": "dummy", "client_secret": "dummy", "refresh_token": "dummy"}'
+                input[0] = 'docker'
+                input[1] = adc.absolutePath
+                input[2] = ''
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('GOOGLE_PROJECT_ID') }
+            )
+        }
+    }
+
+    test("Should pass when an authorized_user file is used and a project ID is set") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                def adc = new File("${outputDir}/withproject/application_default_credentials.json")
+                adc.parentFile.mkdirs()
+                adc.text = '{"type": "authorized_user", "client_id": "dummy", "client_secret": "dummy", "refresh_token": "dummy"}'
+                input[0] = 'docker'
+                input[1] = adc.absolutePath
+                input[2] = 'my-project'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+    test("Should pass when a service_account key is used and no project ID is set") {
+
+        function "checkLocalGcpCredentials"
+
+        when {
+            function {
+                """
+                // the key carries its own project_id
+                def key = new File("${outputDir}/sa_noproject/key.json")
+                key.parentFile.mkdirs()
+                key.text = '{"type": "service_account", "project_id": "dummy", "client_email": "sa@dummy.iam.gserviceaccount.com", "private_key": "dummy"}'
+                input[0] = 'docker'
+                input[1] = key.absolutePath
+                input[2] = null
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+}

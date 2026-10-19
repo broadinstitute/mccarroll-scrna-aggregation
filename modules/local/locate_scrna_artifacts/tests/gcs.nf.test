@@ -1,0 +1,81 @@
+nextflow_process {
+
+    name "Test Process LOCATE_SCRNA_ARTIFACTS against gs://"
+    script "modules/local/locate_scrna_artifacts/main.nf"
+    process "LOCATE_SCRNA_ARTIFACTS"
+    config "./gcs.config"
+    tag "modules"
+    tag "modules_local"
+    tag "locate_scrna_artifacts"
+    tag "gcs"
+    tag "live"
+
+    // Live test: needs network, a GCP credentials JSON (params.gcp_credentials_file) and the docker profile.
+    // Input: tests/live_data/manifest.yaml (real gs:// DGEs). Each generated YAML is compared with the
+    // baseline (equal md5 passes; otherwise field by field, to report the differences) tests/live_data/baseline/artifacts/<uei>.yaml (see docs/testing.md, Live tests); differences are printed.
+    // Run with tests/run_all_tests.sh, or: nf-test test modules/local/locate_scrna_artifacts/tests/gcs.nf.test
+
+    test("Should locate artifacts of real gs:// libraries with the mounted ADC") {
+
+        when {
+            process {
+                """
+                input[0] = [ [ id:'live_analysis' ], file('${projectDir}/tests/live_data/manifest.yaml') ]
+                """
+            }
+        }
+
+        then {
+            def dir = file(process.out.artifacts_dir[0][1])
+            def yamls = dir.listFiles().findAll { it.name.endsWith('.yaml') }
+            def datasets = yamls.collect { new org.yaml.snakeyaml.Yaml().load(it.text).datasets[0] }
+            // show where the generated artifact YAMLs are, for inspection after the run
+            println ""
+            println "Generated artifact YAMLs:"
+            yamls.sort { it.name }.each { println "  ${it}" }
+
+            // comparison with the baseline YAMLs, flattened to dotted keys
+            def flatten
+            flatten = { Map m, String prefix = '' ->
+                m.collectEntries { k, v ->
+                    v instanceof Map ? flatten(v, "${prefix}${k}.") : [("${prefix}${k}".toString()): v]
+                }
+            }
+            def baselineDir = "${projectDir}/tests/live_data/baseline/artifacts".toString()
+            assert new File(baselineDir).isDirectory() : "no baseline in ${baselineDir} (see docs/testing.md, Live tests)"
+            def differences = [:]
+            println ""
+            yamls.each { generated ->
+                def baseline = new File(baselineDir, generated.name)
+                println "Baseline YAML: ${baseline}"
+                if (!baseline.exists()) {
+                    differences[generated.name] = ['(baseline file missing)']
+                } else if (LiveFiles.sameContent(generated, baseline)) {
+                    // identical content (md5): no need to compare the fields
+                    differences[generated.name] = []
+                    println "  matches baseline (md5 ${LiveFiles.contentMd5(generated)})"
+                } else {
+                    // the fields are only compared to report what differs
+                    def actual = flatten(new org.yaml.snakeyaml.Yaml().load(generated.text).datasets[0])
+                    def expected = flatten(new org.yaml.snakeyaml.Yaml().load(baseline.text).datasets[0])
+                    def keys = (actual.keySet() + expected.keySet()).sort()
+                    def diffs = keys.findAll { actual[it] != expected[it] }.collect { "${it}: generated=${actual[it]} baseline=${expected[it]}".toString() }
+                    differences[generated.name] = diffs
+                    println(diffs ? "  ${diffs.size()} difference(s):" : "  matches baseline (${actual.size()} fields)")
+                    diffs.each { println "    ${it}" }
+                }
+            }
+            assertAll(
+                { assert process.success },
+                { assert yamls.size() >= 1 },
+                // each file is named by its uei and points at gs:// artifacts that were actually found
+                { assert yamls.collect { it.name } .sort() == datasets.collect { "${it.uei}.yaml".toString() }.sort() },
+                { assert datasets.every { it.user_dge.startsWith('gs://') } },
+                { assert datasets.every { it.dge_selected_cells.startsWith('gs://') } },
+                // every generated YAML matches its baseline exactly
+                { assert differences.every { name, diffs -> diffs.isEmpty() } }
+            )
+        }
+    }
+
+}

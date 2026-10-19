@@ -1,0 +1,3 @@
+PREFIX	cell_barcode	num_transcripts	donor
+LIB_A	AAAA	100	d1
+LIB_A	CCCC	200	d2

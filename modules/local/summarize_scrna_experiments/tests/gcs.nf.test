@@ -1,0 +1,111 @@
+nextflow_process {
+
+    name "Test Process SUMMARIZE_SCRNA_EXPERIMENTS against gs://"
+    script "modules/local/summarize_scrna_experiments/main.nf"
+    process "SUMMARIZE_SCRNA_EXPERIMENTS"
+    config "./gcs.config"
+    tag "modules"
+    tag "modules_local"
+    tag "summarize_scrna_experiments"
+    tag "gcs"
+    tag "live"
+
+    // Live test: needs network, a GCP credentials JSON, GOOGLE_PROJECT_ID and the docker profile (see docs/testing.md,
+    // "Live tests"; tests/run_all_tests.sh sets the variables for the live tests).
+    // The baseline is tests/live_data/baseline (the output of the prototype script, see docs/testing.md). It holds
+    //   artifacts/<library>.yaml                                (the input of this test, real gs:// URLs)
+    //   artifacts/<library>.library_metrics.txt                 (expected metrics)
+    //   tearsheets/<library>.standard_analysis_tearsheet.txt    (expected tearsheet)
+    // Every library in artifacts/ (every <library>.yaml) is run and compared, one task per library.
+    // Equal md5 passes; otherwise the generated metrics are compared column by column and the tearsheet row by row, and all differences are printed.
+    // Note run_date and run_status come from the newest Nextflow trace in the bucket, so a new run there
+    // makes those two columns differ from an older baseline.
+
+    test("Should reproduce the validated library metrics and tearsheet of every real gs:// library in the baseline") {
+
+        when {
+            // resolved here (not inside the process string) so a missing baseline gives a clear message
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            assert new File(root, 'artifacts').isDirectory() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+            def libs = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.collect { it.name - '.yaml' }.sort()
+            assert libs : "no <library>.yaml in ${root}/artifacts"
+            // one channel item per library: [ meta, artifacts yaml ]
+            def items = libs.collect { "[ [ id:'${it}', analysis_id:'live_analysis' ], file('${root}/artifacts/${it}.yaml') ]" }.join(', ')
+            process {
+                """
+                input[0] = channel.of(${items})
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def parse = { File f ->
+                def lines = f.readLines()
+                def header = lines[0].split('\t', -1) as List
+                [header, lines.drop(1).collect { l -> l.split('\t', -1) as List }]
+            }
+            // emits arrive in no fixed order: pair metrics and tearsheet by library id
+            def metricsByLib = process.out.metrics.collectEntries { meta, f -> [(meta.id): file(f)] }
+            def tearsheetByLib = process.out.tearsheet.collectEntries { meta, f -> [(meta.id): file(f)] }
+            def libs = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.collect { it.name - '.yaml' }.sort()
+
+            def failures = []
+            println ""
+            libs.each { lib ->
+                def generatedMetrics = metricsByLib[lib]
+                def baselineMetrics = new File(root, "artifacts/${lib}.library_metrics.txt")
+                def generatedTearsheet = tearsheetByLib[lib]
+                def baselineTearsheet = new File(root, "tearsheets/${lib}.standard_analysis_tearsheet.txt")
+                println "Library ${lib}:"
+                println "  Generated metrics:   ${generatedMetrics}"
+                println "  Baseline metrics:    ${baselineMetrics}"
+                println "  Generated tearsheet: ${generatedTearsheet}"
+                println "  Baseline tearsheet:  ${baselineTearsheet}"
+
+                // equal md5 passes; the columns/lines are only compared to report what differs
+                def metricsSame = LiveFiles.sameContent(generatedMetrics, baselineMetrics)
+                def tearsheetSame = LiveFiles.sameContent(generatedTearsheet, baselineTearsheet)
+                def (gHeader, gRows) = metricsSame ? [[], []] : parse(generatedMetrics)
+                def (bHeader, bRows) = metricsSame ? [[], []] : parse(baselineMetrics)
+                def metricDiffs = []
+                if (metricsSame) {
+                    // identical content
+                } else if (gHeader != bHeader) {
+                    metricDiffs << "columns differ: generated=${gHeader} baseline=${bHeader}".toString()
+                } else if (gRows.size() != 1 || bRows.size() != 1) {
+                    metricDiffs << "row count: generated=${gRows.size()} baseline=${bRows.size()} (expected 1 each)".toString()
+                } else {
+                    gHeader.eachWithIndex { col, i ->
+                        if (gRows[0][i] != bRows[0][i]) {
+                            metricDiffs << "${col}: generated=${gRows[0][i]} baseline=${bRows[0][i]}".toString()
+                        }
+                    }
+                }
+                def tearsheetDiffs = []
+                def gLines = generatedTearsheet.readLines()
+                def bLines = baselineTearsheet.readLines()
+                if (!tearsheetSame && gLines != bLines) {
+                    (0..<Math.max(gLines.size(), bLines.size())).each { i ->
+                        def g = i < gLines.size() ? gLines[i] : '(missing)'
+                        def b = i < bLines.size() ? bLines[i] : '(missing)'
+                        if (g != b) tearsheetDiffs << "line ${i + 1}: generated=${g} baseline=${b}".toString()
+                    }
+                }
+                println(metricDiffs ? "  Metrics: ${metricDiffs.size()} difference(s):" : "  Metrics: matches baseline (md5 ${LiveFiles.contentMd5(generatedMetrics)})")
+                metricDiffs.each { println "      ${it}" }
+                println(tearsheetDiffs ? "  Tearsheet: ${tearsheetDiffs.size()} difference(s):" : "  Tearsheet: matches baseline (md5 ${LiveFiles.contentMd5(generatedTearsheet)})")
+                tearsheetDiffs.each { println "      ${it}" }
+                if (metricDiffs || tearsheetDiffs) failures << lib
+            }
+
+            assertAll(
+                { assert process.success },
+                // one metrics and one tearsheet per baseline library, none missing, none extra
+                { assert metricsByLib.keySet().sort() == libs },
+                { assert tearsheetByLib.keySet().sort() == libs },
+                { assert failures.isEmpty() : "libraries differing from the baseline: ${failures}" }
+            )
+        }
+    }
+}

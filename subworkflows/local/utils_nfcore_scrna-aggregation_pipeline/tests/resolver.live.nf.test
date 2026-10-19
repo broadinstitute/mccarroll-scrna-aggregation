@@ -1,0 +1,56 @@
+nextflow_function {
+
+    name "Test resolving the libraries of the live manifest against the baseline"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    function "loadAggregationManifest"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'resolver'
+    tag 'live'
+
+    // Live test: needs the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no Docker, no network, no credentials.
+    // Resolves tests/live_data/manifest.yaml with the baseline's artifact files (artifacts/*.yaml, written by LOCATE_SCRNA_ARTIFACTS) and compares
+    // the libraries with what resolve_aggregation_manifest wrote in resolved_manifest/: libraries.tsv (library id, DGE, cell metadata, MapMyCells
+    // model and annotations, reduced GTF) and the arguments file of each library.
+
+    test("Should resolve the same libraries as the baseline's resolved_manifest") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def table = new File(root, 'resolved_manifest/libraries.tsv')
+            assert table.isFile() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+            def lines = table.readLines()
+            def header = lines[0].split('\t', -1) as List
+            def rows = lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
+            def analysis = root.listFiles().find { it.name.endsWith('.cell_metadata.txt') }.name - '.cell_metadata.txt'
+            def artifacts = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.sort { it.name }
+                .collect { LibraryResolver.loadArtifact(it.text) }
+            def entries = AggregationManifest.parse(new File("${projectDir}/tests/live_data/manifest.yaml").text)
+            def result = LibraryResolver.resolve(entries, artifacts, analysis, [:])
+            def libraries = result.libraries
+            println ""
+            println "Resolved ${libraries.keySet()} against ${table}"
+            assertAll(
+                { assert function.success },
+                { assert libraries.keySet() as List == rows*.library_id },
+                { assert rows.every { row ->
+                    def lib = libraries[row.library_id]
+                    lib.dge == row.dge && lib.cellMetadata == row.cell_metadata && lib.mmcModel == row.mmc_model &&
+                        lib.mmcAnnotations == row.mmc_annotations } },
+                { assert rows.every { it.reduced_gtf == result.reducedGtf } },
+                // the baseline's arguments file of each library: one argument per line, as the builder's text
+                { assert rows.every { row ->
+                    JoinFilterArguments.toArgsFileText(libraries[row.library_id].args) ==
+                        new File(root, "resolved_manifest/${row.library_id}.join_and_filter_args.txt").text } }
+            )
+        }
+    }
+}

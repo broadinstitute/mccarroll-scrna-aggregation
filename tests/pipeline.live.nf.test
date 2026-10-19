@@ -1,0 +1,180 @@
+nextflow_pipeline {
+
+    name "Test the whole pipeline against the baseline"
+    script "../main.nf"
+    tag "pipeline"
+    tag "live"
+
+    // Live integration test: needs Docker, the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"), network access to gs://
+    // and credentials, like the live module tests. The pipeline runs ONCE on tests/live_data/manifest.yaml (conf/test.config); only if it succeeds
+    // are the published files compared with the baseline made by the prototype script: equal md5 of the decompressed content first, and the
+    // differing lines only to report a mismatch. Each wired edge adds its comparisons here.
+    // The libraries are resolved in the workflow (LibraryResolver); the plain-text summary of what each library is processed from is checked below.
+    // Published: the merged results flat in the output directory, artifacts/ and tearsheets/ (per library) and pipeline_info/; the per-library
+    // intermediates (library metrics, joined cell metadata, MapMyCells TSV, arguments file) are checked in the work directory.
+
+    def compare = { String what, generated, baseline ->
+        def same = LiveFiles.contentMd5(generated) == LiveFiles.contentMd5(baseline)
+        if (!same) {
+            def g = LiveFiles.lines(generated)
+            def b = LiveFiles.lines(baseline)
+            def diffs = LiveFiles.differingLines(g, b)
+            println ""
+            println "${what} differs from the baseline: ${diffs.size()} differing line(s):"
+            diffs.take(10).each { i ->
+                println "      line ${i + 1}: generated=${i < g.size() ? g[i].take(200) : '(missing)'} baseline=${i < b.size() ? b[i].take(200) : '(missing)'}"
+            }
+        }
+        same
+    }
+
+    test("Should run the whole pipeline on the live manifest and reproduce the baseline") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            assert root.isDirectory() : "no baseline in ${root} (see docs/testing.md, Live tests)"
+            def results = [:]
+            if (workflow.success) {
+                def out = new File("${params.outdir}".toString())
+                // nf-test gives each run its own directory with output/ and work/ side by side
+                def workDir = new File(out.parentFile, 'work')
+                // every file of this name in the work directory: a task's own output, and the links to it in the tasks that read it
+                def workFiles = { String name -> def found = []; workDir.eachFileRecurse { if (it.name == name) found << it }; found }
+                def analysis = 'SMRI_V11.unfiltered'
+
+                // Published: the merged results, flat in the output directory, and two per-library records in directories of their own.
+                // Nothing else is published: the top level has exactly these entries.
+                def mergedNames = ["${analysis}.library_metrics.txt", "${analysis}.cell_metadata.txt", 'matrix.mtx.gz', 'barcodes.tsv.gz', 'features.tsv.gz',
+                    "${analysis}.cell_type_column.txt", "${analysis}.donor_cell_type.txt", "${analysis}.donors.metacells.txt.gz",
+                    "${analysis}.donor_cell_type.metacells.txt.gz"]
+                results['published: only the merged files, artifacts/, tearsheets/ and pipeline_info/'] =
+                    (out.list() as List).sort() == (mergedNames + ['artifacts', 'tearsheets', 'pipeline_info']).sort()
+
+                // the metacells hold the output directory of the run in their first line, which is left out of the comparison
+                def body = { f -> LiveFiles.lines(f).findAll { !it.startsWith('#MakeMetacellsFromTripletDge') } }
+                def compareBody = { String what, generated, baseline ->
+                    def g = body(generated)
+                    def bl = body(baseline)
+                    def diffs = LiveFiles.differingLines(g, bl)
+                    if (!diffs.isEmpty()) {
+                        println ""
+                        println "${what} differs from the baseline: ${diffs.size()} differing line(s):"
+                        diffs.take(10).each { i ->
+                            println "      line ${i + 1}: generated=${i < g.size() ? g[i].take(200) : '(missing)'} baseline=${bl.size() > i ? bl[i].take(200) : '(missing)'}"
+                        }
+                    }
+                    diffs.isEmpty()
+                }
+                // the merged results equal the baseline's (MERGE_LIBRARY_METRICS, MERGE_CELL_METADATA, MAKE_TRIPLET_DGE, FORMAT's cell type column,
+                // DONOR_CELL_TYPE_REPORT, DONOR_METACELLS and DONOR_CELL_TYPE_METACELLS)
+                mergedNames.each { name ->
+                    def generated = new File(out, name)
+                    def baseline = new File(root, name)
+                    results[name] = generated.exists() && (name.contains('.metacells.') ? compareBody(name, generated, baseline) : compare(name, generated, baseline))
+                }
+
+                // LOCATE_SCRNA_ARTIFACTS: artifacts/<uei>.yaml, one per library, the same as the baseline's
+                def baselineArtifacts = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.sort { it.name }
+                baselineArtifacts.each { baseline ->
+                    def generated = new File(out, "artifacts/${baseline.name}")
+                    results["artifacts/${baseline.name}"] = generated.exists() && compare("artifacts/${baseline.name}", generated, baseline)
+                }
+                results['artifacts: no extra libraries'] =
+                    new File(out, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }*.name.sort() == baselineArtifacts*.name
+                def libraries = baselineArtifacts*.name*.minus('.yaml')
+
+                // Every task ran in one of the two public images, tag current (hard coded in the modules): the docker command of each task names it,
+                // and no task used a development tag or a private image
+                def publicImages = ['quay.io/broadinstitute/drop-seq_python:current', 'quay.io/broadinstitute/drop-seq_java:current']
+                def commandRuns = []
+                workDir.eachFileRecurse { if (it.name == '.command.run') commandRuns << it }
+                def imagesOf = { File f -> publicImages.findAll { img -> f.text.contains(" ${img} ") || f.text.contains(" ${img}\n") || f.text.contains("'${img}'") } }
+                results['images: every task ran in a public current image'] = !commandRuns.isEmpty() &&
+                    commandRuns.every { f -> imagesOf(f).size() == 1 && !f.text.contains('jn_test') && !f.text.contains('private') }
+
+                libraries.each { lib ->
+                    // SUMMARIZE_SCRNA_EXPERIMENTS: tearsheets/<library>.standard_analysis_tearsheet.txt is published and the baseline's
+                    def tearsheet = "${lib}.standard_analysis_tearsheet.txt"
+                    def generatedTearsheet = new File(out, "tearsheets/${tearsheet}")
+                    results["tearsheets/${tearsheet}"] = generatedTearsheet.exists() && compare("tearsheets/${tearsheet}", generatedTearsheet, new File(root, "tearsheets/${tearsheet}"))
+                    // the library's metrics row names that library (its own artifact YAML reached the task); the file stays in the work directory
+                    def metricsFiles = workFiles("${lib}.library_metrics.txt")
+                    results["${lib}.library_metrics.txt: in the work directory, row is for ${lib}"] = !metricsFiles.isEmpty() &&
+                        metricsFiles.every { it.readLines().drop(1).collect { l -> l.split('\t', -1)[0] } == [lib] }
+
+                    // BUILD_LIBRARY_CELL_METADATA: the joined and filtered cell metadata is the baseline's, and PREFIX (first column) is the library id on
+                    // every row, so it was built from this library's own inputs; it stays in the work directory
+                    def cmdName = "${lib}.joined_filtered_cell_metadata.txt"
+                    def cmdFiles = workFiles(cmdName)
+                    results["${cmdName}: in the work directory, same as the baseline"] = !cmdFiles.isEmpty() &&
+                        cmdFiles.every { compare(cmdName, it, new File(root, cmdName)) }
+                    results["${cmdName}: PREFIX is ${lib}"] = !cmdFiles.isEmpty() && cmdFiles.every { f ->
+                        f.readLines().with { l -> l[0].split('\t', -1)[0] == 'PREFIX' && l.size() > 1 && l.drop(1).every { it.split('\t', -1)[0] == lib } }
+                    }
+                    // the args file is named after the library and has the baseline's content (the manifest has no donor, joins or filters, so empty)
+                    def argsName = "${lib}.join_and_filter_args.txt"
+                    def argsFiles = workFiles(argsName)
+                    results["${argsName}: in the work directory, same content as the baseline"] =
+                        !argsFiles.isEmpty() && argsFiles.every { it.text == new File(root, "resolved_manifest/${argsName}").text }
+                    // FORMAT_MAPMYCELLS_ANNOTATIONS: the converted TSV exists in the work directory only
+                    results["${lib}.mmc.tsv: in the work directory"] = !workFiles("${lib}.mmc.tsv").isEmpty()
+                }
+            }
+            if (workflow.success) {
+                // The resolved libraries summary: plain text in pipeline_info/ (written by the workflow, read by nothing). For each library it names the
+                // DGE, cell metadata, MapMyCells model and annotations and the reduced GTF of the baseline's resolved_manifest/libraries.tsv, and no arguments
+                // (the baseline's args file is empty: the live manifest has no donor, joins or filters)
+                def summary = file("${params.outdir}/pipeline_info/SMRI_V11.unfiltered.resolved_libraries.txt")
+                results['resolved libraries summary: published in pipeline_info'] = summary.exists()
+                if (summary.exists()) {
+                    def tsv = new File(root, 'resolved_manifest/libraries.tsv').readLines().collect { it.split('\t', -1) as List }
+                    def text = summary.text
+                    tsv.drop(1).collect { r -> tsv[0].collectEntries { c -> [(c): r[tsv[0].indexOf(c)]] } }.each { b ->
+                        def block = text.split('\n\n').find { it.startsWith("Library ${b.library_id}\n") }
+                        results["summary: library ${b.library_id}"] = block != null &&
+                            block.contains("  DGE:           ${b.dge}\n") && block.contains("  Cell metadata: ${b.cell_metadata}\n") &&
+                            block.contains("  MapMyCells:    model ${b.mmc_model}, annotations ${b.mmc_annotations}\n") &&
+                            block.endsWith("(one per line, as in ${b.library_id}.join_and_filter_args.txt):\n${' ' * 17}none\n".toString()) 
+                        results['summary: reduced GTF'] = text.contains("Reduced GTF: ${b.reduced_gtf}\n")
+                    }
+                }
+                // the baseline has donors, so the summary says so; the summary is published nowhere else
+                results['summary: donors'] = summary.exists() && summary.text.contains('Donors:      yes\n')
+                results['summary: published only in pipeline_info'] = new File("${params.outdir}").listFiles().findAll { it.isDirectory() }
+                    .collectMany { d -> d.name == 'pipeline_info' ? [] : (d.listFiles() as List) }.every { !it.name.contains('resolved_libraries') }
+            }
+            assertAll(
+                { assert workflow.success },
+                { assert results.findAll { !it.value }.isEmpty() : "outputs differing from the baseline: ${results.findAll { !it.value }.keySet()}" }
+            )
+        }
+    }
+
+    test("Should stop with the reason when the libraries cannot be resolved, before any library is processed") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                // the library id (the artifact uei) may not be the analysis id: a resolver error that needs only the one live library
+                analysis_id = 'SMRI_V11_rxn1'
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.stdout.join('\n').contains('Cannot resolve the libraries of SMRI_V11_rxn1') ||
+                         workflow.stderr.join('\n').contains('Cannot resolve the libraries of SMRI_V11_rxn1') },
+                { assert (workflow.stdout + workflow.stderr).join('\n').contains('cannot be the same as the analysis identifier') },
+                // nothing that needs the resolved libraries ran
+                { assert !(workflow.trace.tasks().any { it.name.contains('SUMMARIZE_') || it.name.contains('BUILD_') || it.name.contains('FORMAT_') }) }
+            )
+        }
+    }
+}

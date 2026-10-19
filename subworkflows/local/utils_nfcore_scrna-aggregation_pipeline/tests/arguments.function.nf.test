@@ -1,0 +1,232 @@
+nextflow_function {
+
+    name "Test join_and_filter_tsv arguments built from a manifest entry"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    function "loadAggregationManifest"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'manifest'
+    tag 'arguments'
+
+    // Contract: JoinFilterArguments.build(Map entry) (lib/JoinFilterArguments.groovy), called directly by these tests, takes one entry of
+    // AggregationManifest.parse and returns [args: List<String>, files: List<String>]:
+    //   args:  the arguments of join_and_filter_tsv for the donor, joins and filters, in this order: --set donor, the joins in manifest order, then
+    //          per filter column (manifest order): includeFile, excludeFile, include, exclude, min, max. Paths of files are the staged base names.
+    //          Values are written with toString. The same order and text as dropseq's resolve_aggregation_manifest.join_and_filter_args, except the
+    //          paths and that a boolean is 'true' (Python 'True'; the tool reads either).
+    //   files: the original paths of the files to stage (joinFile, includeFile, excludeFile), each once, in order of first use.
+    // Two different paths with the same base name in one entry throw IllegalArgumentException.
+    // JoinFilterArguments.toArgsFileText(List args) is the content of the arguments file: one argument per line.
+    // The host is the wrapper loadAggregationManifest, which calls the builder for each entry to report an error before any process runs.
+
+    def entryOf = { String yaml -> AggregationManifest.parse(yaml.stripIndent())[0] }
+    def failure = { Closure c ->
+        try {
+            c()
+            return null
+        } catch (IllegalArgumentException e) {
+            return e.message
+        }
+    }
+
+    test("Should write the donor, joins and filters in the order of the original Python resolver, with staged file names") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entry = entryOf('''
+                dges:
+                  - dge: a
+                    donor: N1
+                    joins:
+                      - {joinFile: /data/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
+                      - {joinFile: "gs://b/second.tsv", leftColumn: x, joinColumn: y}
+                    filters:
+                      doublet: {exclude: doublet}
+                      pct_mt: {max: 0.1}
+                      max.prob: {min: 0.8}
+                      DONOR: {include: [D1, D2], includeFile: /data/keep.txt}
+                      other: {excludeFile: "gs://b/drop.txt", exclude: [1, true], min: 3}
+            ''')
+            def built = JoinFilterArguments.build(entry)
+            assertAll(
+                { assert function.success },
+                // The expected arguments are the output of join_and_filter_args (dropseq resolve_aggregation_manifest) for the same filters
+                // and joins, with the file paths replaced by their base names and --set donor first as resolve() does; Python wrote True
+                { assert built.args == [
+                    '--set', 'donor', 'N1',
+                    '--join', 'extra.tsv', 'cell_barcode', 'cell', '--join', 'second.tsv', 'x', 'y',
+                    '--exclude', 'doublet', 'doublet',
+                    '--max', 'pct_mt', '0.1',
+                    '--min', 'max.prob', '0.8',
+                    '--include-file', 'DONOR', 'keep.txt', '--include', 'DONOR', 'D1', 'D2',
+                    '--exclude-file', 'other', 'drop.txt', '--exclude', 'other', '1', 'true', '--min', 'other', '3'] },
+                // the files to stage: joins first, then filters, in order of use
+                { assert built.files == ['/data/extra.tsv', 'gs://b/second.tsv', '/data/keep.txt', 'gs://b/drop.txt'] }
+            )
+        }
+    }
+
+    test("Should give no arguments and no files for an entry with no donor, joins or filters, and only --set donor for a donor") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def none = JoinFilterArguments.build(entryOf('dges: [{dge: a}]'))
+            def donorOnly = JoinFilterArguments.build(entryOf('dges: [{dge: a, donor: N1}]'))
+            def emptyLists = JoinFilterArguments.build(entryOf('dges: [{dge: a, filters: {c: {include: [], exclude: []}}}]'))
+            assertAll(
+                { assert function.success },
+                { assert none == [args: [], files: []] },
+                { assert donorOnly == [args: ['--set', 'donor', 'N1'], files: []] },
+                // an empty include or exclude list would make the tool fail (it needs a value), and filters nothing in the original: skipped
+                { assert emptyLists == [args: [], files: []] }
+            )
+        }
+    }
+
+    test("Should stage each file once, and use the base name of local paths and gs:// URLs") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def built = JoinFilterArguments.build(entryOf('''
+                dges:
+                  - dge: a
+                    joins: {joinFile: "gs://bucket/dir/shared.tsv", leftColumn: x, joinColumn: y}
+                    filters:
+                      c1: {includeFile: "gs://bucket/dir/shared.tsv"}
+                      c2: {excludeFile: /local/dir/with space/list.txt}
+            '''))
+            assertAll(
+                { assert function.success },
+                // the same path used for a join and a filter is staged once; a base name with a space is kept as it is
+                { assert built.files == ['gs://bucket/dir/shared.tsv', '/local/dir/with space/list.txt'] },
+                { assert built.args == [
+                    '--join', 'shared.tsv', 'x', 'y', '--include-file', 'c1', 'shared.tsv', '--exclude-file', 'c2', 'list.txt'] }
+            )
+        }
+    }
+
+    test("Should reject two different files with the same base name in one entry, naming both") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def entry = entryOf('''
+                dges:
+                  - dge: gs://b/one.txt.gz
+                    joins: {joinFile: /data/a/keep.txt, leftColumn: x, joinColumn: y}
+                    filters: {c: {includeFile: "gs://b/other/keep.txt"}}
+            ''')
+            def message = failure { JoinFilterArguments.build(entry) }
+            def pathEnding = failure { JoinFilterArguments.build(entryOf('dges: [{dge: a, joins: {joinFile: "/data/dir/", leftColumn: x, joinColumn: y}}]')) }
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('gs://b/one.txt.gz') },
+                { assert message.contains('/data/a/keep.txt') && message.contains('gs://b/other/keep.txt') && message.contains('keep.txt') },
+                // a path with no file name cannot be staged
+                { assert pathEnding != null && pathEnding.contains('/data/dir/') }
+            )
+        }
+    }
+
+    test("Should write numbers, booleans and numeric donors with toString, as the original workflow does") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def built = JoinFilterArguments.build(entryOf('''
+                dges:
+                  - dge: a
+                    donor: 12
+                    filters:
+                      c: {min: 0.8, max: 3, include: [7, true, text]}
+                      tiny: {max: 0.0001}
+            '''))
+            def args = built.args
+            def tinyIndex = args.indexOf('tiny')
+            assertAll(
+                { assert function.success },
+                { assert args.take(3) == ['--set', 'donor', '12'] },
+                { assert args.subList(args.indexOf('--min'), args.indexOf('--min') + 3) == ['--min', 'c', '0.8'] },
+                { assert args.subList(args.indexOf('--max'), args.indexOf('--max') + 3) == ['--max', 'c', '3'] },
+                { assert args.subList(args.indexOf('--include'), args.indexOf('--include') + 5) == ['--include', 'c', '7', 'true', 'text'] },
+                // a small number may be written in exponent form (1.0E-4), which the tool also reads as a float
+                { assert Double.parseDouble(args[tinyIndex + 1]) == 0.0001 }
+            )
+        }
+    }
+
+    test("Should write one argument per line, with an empty file for no arguments") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success },
+                { assert JoinFilterArguments.toArgsFileText([]) == '' },
+                { assert JoinFilterArguments.toArgsFileText(['--set', 'donor', 'N 1']) == '--set\ndonor\nN 1\n' },
+                // an empty argument is a blank line, which the tool reads back as an empty argument
+                { assert JoinFilterArguments.toArgsFileText(['--include', 'c', '']) == '--include\nc\n\n' }
+            )
+        }
+    }
+
+    test("Should report a staged file name collision when the manifest is loaded, before any process runs") {
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/fixtures/basename_collision.manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('basename_collision.manifest.yaml') },
+                { assert output.contains('keep.txt') }
+            )
+        }
+    }
+}
