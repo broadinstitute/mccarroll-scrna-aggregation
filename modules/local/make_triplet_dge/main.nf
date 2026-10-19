@@ -2,8 +2,8 @@ process MAKE_TRIPLET_DGE {
     tag "$meta.id"
     label 'process_medium'
 
-    // Image registry/name and tag are parameters so local (jn_test) and production images can differ.
-    container "${params.java_image}:${params.image_tag}"
+    // The public Drop-seq image, tag 'current'. To use another tag (a branch build, say), override it with a withName: container setting in a config.
+    container 'quay.io/broadinstitute/drop-seq_java:current'
 
     input:
     // meta.id is the analysis id. The three lists have one element per library, in the same (merge) order:

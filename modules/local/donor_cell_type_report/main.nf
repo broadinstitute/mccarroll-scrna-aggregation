@@ -2,8 +2,8 @@ process DONOR_CELL_TYPE_REPORT {
     tag "$meta.id"
     label 'process_single'
 
-    // Image registry/name and tag are parameters so local (jn_test) and production images can differ.
-    container "${params.python_image}:${params.image_tag}"
+    // The public Drop-seq image, tag 'current'. To use another tag (a branch build, say), override it with a withName: container setting in a config.
+    container 'quay.io/broadinstitute/drop-seq_python:current'
 
     input:
     // meta.id is the analysis id. cell_metadata: the merged <analysis>.cell_metadata.txt (tab-separated, with donor and
