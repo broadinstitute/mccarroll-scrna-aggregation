@@ -9,7 +9,7 @@
 include { LOCATE_SCRNA_ARTIFACTS } from '../main'
 
 workflow {
-    // Input: one manifest file. Emits: tuple val(meta), path('artifacts') directory of <uei>.yaml files (one item)
-    LOCATE_SCRNA_ARTIFACTS( channel.of([ [ id:'live_analysis' ], file("${projectDir}/../../../../tests/live_data/manifest.yaml") ]) )
-    LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir.view { meta, dir -> "artifacts for ${meta.id}: ${dir.listFiles()*.name.sort()}" }
+    // Input: one manifest file. Emits: record(meta, artifacts: path('artifacts')) directory of <uei>.yaml files (one item)
+    LOCATE_SCRNA_ARTIFACTS( channel.of(record(meta: [ id:'live_analysis' ], manifest: file("${projectDir}/../../../../tests/live_data/manifest.yaml"))) )
+    LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir.view { result -> "artifacts for ${result.meta.id}: ${result.artifacts.listFiles()*.name.sort()}" }
 }

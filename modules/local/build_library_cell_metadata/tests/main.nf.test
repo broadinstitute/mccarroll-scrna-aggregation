@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "build_library_cell_metadata"
 
-    // Contract: tuple val(meta), path(cell_metadata), path(mmc_tsv or []), path(args_file), path(extra_files or [])
-    //           -> cell_metadata: tuple val(meta), path('<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt').
+    // Contract: record(meta: Map, cell_metadata: Path, mmc_tsv: Path? (null for none), args_file: Path, extra_files: List<Path> ([] for none))
+    //           -> cell_metadata: record(meta: Map, cell_metadata: Path '<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt').
     // args_file holds the manifest's donor, joins and filters for join_and_filter_tsv --args-file, one argument per line (an empty file for none);
     // there is no ext.args.
     // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
@@ -21,19 +21,19 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
+                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             assertAll(
                 { assert process.success },
                 { assert process.out.cell_metadata.size() == 1 },
                 // meta propagated; name from meta.id
-                { assert process.out.cell_metadata[0][0] == [ id:'LIB_A' ] },
-                { assert file(process.out.cell_metadata[0][1]).name == 'LIB_A.joined_filtered_cell_metadata.txt' },
+                { assert process.out.cell_metadata[0].meta == [ id:'LIB_A' ] },
+                { assert file(process.out.cell_metadata[0].cell_metadata).name == 'LIB_A.joined_filtered_cell_metadata.txt' },
                 // PREFIX = meta.id first, then the original columns and rows in order
                 { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor'] },
                 { assert lines.drop(1) == [
@@ -49,13 +49,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"), file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
+                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             assertAll(
                 { assert process.success },
                 // MapMyCells columns are added after the input columns; the join key cell_id is not added
@@ -74,14 +74,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), file("${moduleDir}/tests/fixtures/mmc.tsv"),
-                    file("${moduleDir}/tests/fixtures/args_donor_filters.txt"), [] ]
+                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args_file: file("${moduleDir}/tests/fixtures/args_donor_filters.txt"), extra_files: [])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             def header = lines[0]
             assertAll(
                 { assert process.success },
@@ -101,14 +100,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_join_extra.txt"),
-                    [ file("${moduleDir}/tests/fixtures/extra.tsv") ] ]
+                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_join_extra.txt"), extra_files: [ file("${moduleDir}/tests/fixtures/extra.tsv") ])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             assertAll(
                 { assert process.success },
                 // extra.tsv's columns are added (its join column cell is not); GGGG, absent from extra.tsv, is kept with an empty value
@@ -123,13 +121,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_special_value.txt"), [] ]
+                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_special_value.txt"), extra_files: [])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             def donors = lines.drop(1).collect { it[lines[0].indexOf('donor')] }
             assertAll(
                 { assert process.success },
@@ -145,13 +143,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_NA' ], file("${moduleDir}/tests/fixtures/cmd.tsv"), [], file("${moduleDir}/tests/fixtures/args_empty.txt"), [] ]
+                input[0] = record(meta: [ id:'LIB_NA' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.cell_metadata[0][1])
+            def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             assertAll(
                 { assert process.success },
                 { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor'] },

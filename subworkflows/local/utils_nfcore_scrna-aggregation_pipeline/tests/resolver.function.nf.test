@@ -430,6 +430,37 @@ nextflow_function {
         }
     }
 
+    test("Should check the cell type column from two parallel lists as it does from a map, and reject lists that do not pair up") {
+
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def same = LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_neighborhood_name', 'M_neighborhood_name'])
+            def none = LibraryResolver.checkCellTypeColumn([], [])
+            def message = failure { LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_class_name', 'M_neighborhood_name']) }
+            def unpaired = failure { LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_class_name']) }
+            assertAll(
+                { assert function.success },
+                { assert same == 'M_neighborhood_name' },
+                // no library has results: no column, no error
+                { assert none == null },
+                // the same message as the map form: it names both libraries and both columns
+                { assert message != null },
+                { assert message.contains('LIB_A') && message.contains('LIB_B') },
+                { assert message.contains('M_class_name') && message.contains('M_neighborhood_name') },
+                // a library without its column (or the reverse) is an error, not a silently shorter map
+                { assert unpaired != null && unpaired.contains('pair up') }
+            )
+        }
+    }
+
     test("Should return the one cell type column of the libraries with MapMyCells results, and fail when they differ") {
 
         when {

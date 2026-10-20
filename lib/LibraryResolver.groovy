@@ -47,7 +47,7 @@ class LibraryResolver {
      *   [libraryId, position (0-based, in manifest order), hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]: the DGE is the one the manifest names; the arguments
      *   and files are those of JoinFilterArguments.build.  mmcAnnotations is the csv of the model, or NA, and gates the MapMyCells conversion.
      */
-    static Map resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options = [:]) {
+    static Map resolve(Iterable<Map> entries, Iterable<Map> artifacts, String analysisId, Map options = [:]) {
         String mmcModel = options.mmcModel
         String referenceOverride = options.reference
 
@@ -190,6 +190,18 @@ class LibraryResolver {
                 "The libraries have different cell type columns: ${columnByLibrary}.  Set the mmc_level and mmc_model parameters so they agree.")
         }
         return columns ? columns.first() : null
+    }
+
+    /**
+     * The same check for two parallel lists (typed workflows have no collectEntries on a list).
+     * @param libraryIds the library ids that have MapMyCells results
+     * @param columns the cell type column of each of those libraries, in the same order
+     */
+    static String checkCellTypeColumn(List<String> libraryIds, List<String> columns) {
+        if (libraryIds.size() != columns.size()) {
+            throw new IllegalArgumentException("Got ${libraryIds.size()} library ids and ${columns.size()} cell type columns: they must pair up")
+        }
+        return checkCellTypeColumn([libraryIds, columns].transpose().collectEntries { pair -> [(pair[0]): pair[1]] } as Map<String, String>)
     }
 
     /** @return the one dataset of an artifact file, after checking that it has a uei and a user_dge */

@@ -1,0 +1,61 @@
+nextflow_process {
+
+    name "Test Process WRITE_TEXT_FILE"
+    script "modules/local/write_text_file/main.nf"
+    process "WRITE_TEXT_FILE"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "write_text_file"
+
+    // Contract: record(name: String, text: String) -> one file named <name> with exactly <text> (nothing added).
+    // An exec process: it runs in the Nextflow head job, with no container and no script.
+    // Fixture: tests/fixtures/special_text.txt has multiple lines, a leading space, a dollar sign, single and double quotes, a backslash and a
+    // tab, and no final newline; it must come out byte for byte.
+
+    test("Should write the text exactly as given, with no change to spaces, quotes, a dollar sign or the final newline") {
+
+        when {
+            process {
+                """
+                input[0] = record(name: 'args.txt', text: file("${moduleDir}/tests/fixtures/special_text.txt").text)
+                """
+            }
+        }
+
+        then {
+            def written = file(process.out[0][0])
+            def expected = file("${moduleDir}/tests/fixtures/special_text.txt")
+            assertAll(
+                { assert process.success },
+                { assert process.out[0].size() == 1 },
+                // named for the name input
+                { assert written.name == 'args.txt' },
+                // byte for byte (the fixture has no final newline, so none may be added)
+                { assert written.bytes == expected.bytes },
+                { assert !written.text.endsWith('\n') }
+            )
+        }
+    }
+
+    test("Should write an existing, empty file when the text is empty") {
+
+        when {
+            process {
+                """
+                input[0] = record(name: 'no_args.txt', text: '')
+                """
+            }
+        }
+
+        then {
+            def written = file(process.out[0][0])
+            assertAll(
+                { assert process.success },
+                { assert written.name == 'no_args.txt' },
+                { assert written.exists() },
+                { assert written.size() == 0 }
+            )
+        }
+    }
+}

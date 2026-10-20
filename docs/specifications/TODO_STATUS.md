@@ -1,12 +1,14 @@
 # TODO / status
 
-Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; docs updated, no pipeline code changed). Branch `jn_initial_module_work`. Sessions 4 to 7 are committed (6 commits after `ab0f491`, not pushed). Commit only when the user asks.
+Last updated: 2026-10-20 (session 8: strict syntax + static typing done, see B; docs updated). Branch `jn_google_cloud_analysis`. The typing work is NOT committed yet (many modified files, plus new `conf/params.config` and `modules/local/write_text_file/`): the full suite passed, so commit when the user says so. Sessions 4 to 7 are committed. Commit only when the user asks.
+
+**NEXT (handoff): section C, workflow-level tests on small synthetic data sets** that check how the manifest's filters, joins, donor, etc. reach `BUILD_LIBRARY_CELL_METADATA` and the merged outputs. Start with the clarification questions and the severity-ranked candidate list; stop for the user's selection.
 
 ## 1. Where we are
 
-- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 92 tests in about 10 minutes with no failures at the end of session 6
+- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 97 tests in about 10 minutes with no failures at the end of session 8 (after the typing)
   (needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`).
-  `nextflow lint .` has no errors and 7 old warnings (the template's `Channel.topic`, the unused `ch_collated_versions`, a few implicit closure parameters).
+  `nextflow lint .` is clean (48 files, no errors or warnings).
 - **What the pipeline does** (`main.nf` -> `workflows/scrna-aggregation.nf`; data-flow diagram in `../data_flow.md`):
   `PIPELINE_INITIALISATION` checks credentials and the manifest -> `LOCATE_SCRNA_ARTIFACTS` -> `LibraryResolver.resolve` (head job, Groovy) -> per library
   `SUMMARIZE_SCRNA_EXPERIMENTS`, `FORMAT_MAPMYCELLS_ANNOTATIONS` (only with MapMyCells results), `BUILD_LIBRARY_CELL_METADATA` -> merged `MERGE_LIBRARY_METRICS`,
@@ -20,28 +22,14 @@ Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; d
 ### A. Commit the work (done in session 7)
 Committed in 6 groups (old resolver modules removed, modules, workflow/config/resolver, tests, Batch checks, docs). Not pushed. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories before the next commit.
 
-### B. Nextflow language: strict syntax and static typing (NEW, user request)
-The user wants the pipeline to use the current Nextflow language (strict syntax) and potentially static typing.
-- **Verified (session 6, Seqera blog https://seqera.io/blog/nextflow-26-10-what's-new/):** static typing is STABLE and production-ready in 26.10, but still OPT-IN per script via `nextflow.enable.types`
-  (not the default; existing code runs unchanged, adopt gradually). `nextflow lint` reports type errors; `nextflow run` also checks types but only warns. Recommended: run `nextflow lint` in CI before `nextflow run`.
-  The `migrate-nextflow-code` skill (nextflow-io/agent-skills) also handles strict syntax, topic channels and replacing `publishDir` with the `output` block. Docs: docs.seqera.io/nextflow/static-typing.
-  The blog never says "V2"; per the user, DSL2 (called "V2") has been the default for years, so the pipeline already is DSL2; the remaining language work is strict syntax (`nextflow lint` clean) and optional typing. Tutorial:
-https://docs.seqera.io/nextflow/tutorials/static-types (checked at the end of session 6; Nextflow here is 26.10.0).
-- **What that page says** (consistent with the blog above: typing is optional, not the default, and
-  that existing code keeps working): each script that uses typed features sets `nextflow.enable.types = true`; pipeline parameters go in a typed `params { ... }` block;
-  `record` types replace `tuple` (`record Sample { id: String, ... }`), processes get typed inputs (`record(id: String, fastq_1: Path)`, `Path`, `Bag<Path>` for several staged
-  files) and typed outputs (`record(id: id, quant: file("..."))`, `file()` / `files()` instead of `path`), `take:` / `emit:` of workflows are typed (`samples: Channel<X> = ch`);
-  every process a workflow calls must be migrated before the workflow; `fromFilePairs()` does not work with types; type errors are reported by `nextflow lint` and the language
-  server; there is a `migrate-nextflow-code` agent skill.
-- **State of this repo:** no `nextflow.enable.types` anywhere; legacy `params.x` access in `main.nf` and the workflow; tuples with `val(meta)` maps everywhere; the nf-core template
-  subworkflows under `subworkflows/nf-core/` and `utils_nfcore_scrna-aggregation_pipeline` use the old style; `nextflow.config` has `nextflow.enable.configProcessNamesValidation`.
-- **To do:** (1) fix everything `nextflow lint` reports under strict syntax; consider `publishDir` -> `output` block (the blog says the migration skill does it; our explicit publishing in `conf/modules.config` would move); the first cheap step is the 7 existing warnings
-  (`Channel.topic` -> `channel.topic`, remove the unused `ch_collated_versions`, explicit closure parameters in `workflows/scrna-aggregation.nf` and the modules); (2) a typed `params`
-  block (use `nextflow_schema.json` as the reference; params: `manifest`, `analysis_id`, `reference`, `mmc_model`, `mmc_level`, `outdir`, `gcp_credentials_file`, boilerplate); (3) decide
-  whether to go further to static typing: records for the per-library item (today `tuple val(meta_lib), val(record)`, where `record` is a Groovy map from `LibraryResolver`; a `record`
-  type with `libraryId`, `position`, `dge`, `cellMetadata`, `mmcModel`, `mmcAnnotations`, `args: List<String>`, `files: List<String>` fits) and typed process inputs / outputs, migrating
-  the leaves first (the 9 modules), then the workflow; (4) check the nf-core template pieces still compile with types (`utils_nfcore_*`); (5) keep every nf-test green after each step
-  (module tests call processes with tuple inputs: they change with the types); (6) record the decision and the nf-test impact in `../development.md`.
+### B. Nextflow language: strict syntax and static typing (DONE in session 8, not committed)
+- Every script has `nextflow.enable.types = true` (Nextflow 26.10.0): `main.nf` (typed `params` block, types only; defaults in `conf/params.config`, included by `nextflow.config`), the init subworkflow (`Manifest` record),
+  `workflows/scrna-aggregation.nf` (`Library` record, record joins by `id`, typed helper `toLibraries`) and the 8 modules (record inputs, named record outputs). Module tests use `record(...)` inputs.
+- `collectFile` is replaced by the `exec` process `WRITE_TEXT_FILE` (4 aliases: resolved summary, args file, cell type column, versions). `topic: versions` is gone; `WRITE_VERSIONS` writes the versions file.
+- `help` decision: `String?` with default `null`; a bare `--help` prints the general help (intercepted in `PIPELINE_INITIALISATION`); `--help <name>` describes one parameter. 2 tests.
+- New tests: 2 `WRITE_TEXT_FILE`, 1 `checkCellTypeColumn` two-list overload, 2 help. Suite: 97 tests, all passed. Details and rules learned: `../development.md` (Static typing).
+- Behaviour changes to remember: the cell type column file and resolved summary are published with `publishDir` (rewritten on re-runs) instead of `collectFile(storeDir:)`; undeclared params fail early.
+- **Still open:** migrate `publishDir` (`conf/modules.config`) to the `output` block (separate block, user-approved for after typing); not done.
 
 ### C. Workflow-level tests that the live data cannot give (user: "we're going to want tests on filtering that the shell script data can't reproduce anyway")
 All of these are tested today only at Groovy level (`resolver.function.nf.test`, `arguments.function.nf.test`), not through the workflow:
@@ -53,6 +41,10 @@ All of these are tested today only at Groovy level (`resolver.function.nf.test`,
   dataset on LOCAL paths (LOCATE accepts local paths; its module tests already use local fixtures), real processes on tiny data (user-approved direction, "B for now"); (b) a second real
   library on `gs://` for a two-library live manifest (also covers edges 3 to 6). `tests/live_data/manifest_no_donors.yaml` (selected-cells DGE, no donors) has never been run; no
   prototype baseline exists for it.
+- **Planned next (user, end of session 8): workflow-level tests with small SYNTHETIC data sets** (option (a): local paths, real processes on tiny data) that test the argument passing from the original manifest:
+  `donor`, `filters` (`min`, `max`, `include`, `exclude`, `includeFile`, `excludeFile`), `joins` and `dgeDefaults` through `LibraryResolver` -> `WRITE_ARGS_FILE` -> `BUILD_LIBRARY_CELL_METADATA` -> merged cell metadata, with
+  two or more libraries, no-donor and no-MapMyCells variants (the no-MMC path, `mmc_tsv = null`, has never run through the workflow). The workflow is typed now, so a test pipeline run needs the fake library tree of LOCATE's fixtures
+  (`modules/local/locate_scrna_artifacts/tests/fixtures/README.md`), a reduced GTF fixture and the profile/params of `tests/nextflow.config`.
 - Process reminder: ask clarification questions, state the data contract, list severity-ranked candidate tests, STOP for the user's selection (see Ground rules).
 
 ### D. Google Cloud / Batch (session 7 tested the basics; the full pipeline has NOT yet run on Batch)
@@ -76,8 +68,8 @@ All of these are tested today only at Groovy level (`resolver.function.nf.test`,
   the user's starting guess; "not an especially memory hungry process"). The label is still `process_medium` (nf-core template: 6 CPUs, 8 h); only memory is overridden. The single
   live library peaked at 625 MB resident memory for `MAKE_TRIPLET_DGE`, so tune with real multi-library sizes on Batch. There is no retry strategy (`errorStrategy`) yet.
 - Check on Batch: the public images pull (`quay.io/broadinstitute/drop-seq_python:current`, `quay.io/broadinstitute/drop-seq_java:current`; `docker.registry = 'quay.io'` only prefixes names
-  without a host); `gs://` reads of the artifact directory, cell metadata, MapMyCells csv and the 340 MB reduced GTF in the head job and in tasks; `collectFile` of the args files and
-  `storeDir`/`publishDir` with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
+  without a host); `gs://` reads of the artifact directory, cell metadata, MapMyCells csv and the 340 MB reduced GTF in the head job and in tasks; `the `exec` process `WRITE_TEXT_FILE` (it must run in the head job: confirm that no `WRITE_*` task is submitted as a Batch job) and
+  `publishDir` with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
   `GOOGLE_CLOUD_PROJECT` is empty (untested); `process.resourceLimits` in `conf/test.config` (15 GB) vs the tasks.
 - To test another image tag later (a branch build, with Seqera Platform or a config): `process { withName: 'X' { container = '...' } }`. The tags are hard coded in each module (`current`).
 
@@ -98,8 +90,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
   builds; the pipeline (public `current` images) reproduces it exactly for the live manifest. Remake the baseline with the public images when convenient (command in `../testing.md`).
 - **Template leftovers:** `conf/test_full.config` duplicates `conf/test.config` (same manifest); `.github/` still has the nf-core template files; `tower.yml`; `modules.json` lists nf-core
   pieces only; the README has no workflow figure; `CHANGELOG.md` has one entry.
-- **`versions`:** user decision: the hard-coded `current` image tags are the version record, no per-module version collection. The template's `softwareVersionsToYAML` / `Channel.topic("versions")`
-  block in the workflow still writes `pipeline_info/scrna-aggregation_software_versions.yml`; check what it contains (probably only Nextflow and the pipeline) and simplify it (see B).
+- **`versions`:** user decision: the hard-coded `current` image tags are the version record, no per-module version collection. `WRITE_VERSIONS` writes `pipeline_info/scrna-aggregation_software_versions.yml` from `workflowVersionToYAML()` (Nextflow and the pipeline only).
 - **Docs:** `../output.md`, `../usage.md`, `../data_flow.md`, `../testing.md`, `../development.md`, `../credentials.md` were updated in session 6; `docs/README.md` is the index. The `README.md` is a
   short manual-written version; add a workflow figure if wanted.
 
@@ -167,7 +158,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 ## 7. Run the tests
 ```bash
 export GOOGLE_PROJECT_ID=bican-um1-mccarroll
-tests/run_all_tests.sh                                   # everything, 92 tests, about 10 minutes (needs the baseline, see ../testing.md)
+tests/run_all_tests.sh                                   # everything, 97 tests, about 10 minutes (needs the baseline, see ../testing.md)
 nf-test test modules/local/<module>/tests/main.nf.test   # one file; --tag live runs all the live tests
 nf-test test tests/pipeline.live.nf.test                 # the whole pipeline once vs the baseline, about a minute
 ```

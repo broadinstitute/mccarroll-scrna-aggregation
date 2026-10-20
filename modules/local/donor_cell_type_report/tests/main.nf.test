@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "donor_cell_type_report"
 
-    // Contract: tuple val(meta), path(cell_metadata), val(cell_type_column)
-    //           -> report: tuple val(meta), path('<ext.prefix ?: meta.id>.donor_cell_type.txt').
+    // Contract: record(meta: Map, cell_metadata: Path, cell_type_column: String)
+    //           -> report: record(meta: Map, report: Path '<ext.prefix ?: meta.id>.donor_cell_type.txt').
     // Fixtures: tests/fixtures/README.md (expected counts, fractions and medians are worked out there).
     // The live comparison with the baseline is in live.nf.test.
 
@@ -21,19 +21,19 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), 'M_class_name' ]
+                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_class_name')
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.report[0][1])
+            def lines = tsvLines(process.out.report[0].report)
             assertAll(
                 { assert process.success },
                 { assert process.out.report.size() == 1 },
                 // meta propagated; name from meta.id
-                { assert process.out.report[0][0] == [ id:'analysis1' ] },
-                { assert file(process.out.report[0][1]).name == 'analysis1.donor_cell_type.txt' },
+                { assert process.out.report[0].meta == [ id:'analysis1' ] },
+                { assert file(process.out.report[0].report).name == 'analysis1.donor_cell_type.txt' },
                 { assert lines[0] == header },
                 // donors, then cell types within a donor, in order of first appearance; fractions of the donor's cells,
                 // rounded to 3 places; medians of num_retained_transcripts (D2 GABA: even count, 10 and 25 -> 17.5)
@@ -51,13 +51,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata_missing_donor_or_cell_type.tsv"), 'M_class_name' ]
+                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata_missing_donor_or_cell_type.tsv"), cell_type_column: 'M_class_name')
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.report[0][1])
+            def lines = tsvLines(process.out.report[0].report)
             assertAll(
                 { assert process.success },
                 { assert lines[0] == header },
@@ -78,7 +78,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), 'M_nope_name' ]
+                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_nope_name')
                 """
             }
         }

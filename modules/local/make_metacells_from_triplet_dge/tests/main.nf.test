@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "make_metacells_from_triplet_dge"
 
-    // Contract: tuple val(meta), path(matrix), path(features), path(barcodes), path(cell_metadata), val(group_columns)
-    //           -> metacells: tuple val(meta), path('<ext.prefix ?: meta.id>.metacells.txt.gz').
+    // Contract: record(meta: Map, matrix: Path, features: Path, barcodes: Path, cell_metadata: Path, group_columns: List<String>)
+    //           -> metacells: record(meta: Map, metacells: Path '<ext.prefix ?: meta.id>.metacells.txt.gz').
     // Fixtures: tests/fixtures/README.md (cells, counts and the expected sums are worked out there). Uses the local private Java
     // image (nextflow.config). The live comparison with the baseline is in live.nf.test.
 
@@ -26,22 +26,22 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ],
-                    file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), file("${moduleDir}/tests/fixtures/features.tsv.gz"),
-                    file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
-                    [ 'donor' ] ]
+                input[0] = record(meta: [ id:'analysis1' ],
+                    matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
+                    barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
+                    group_columns: [ 'donor' ])
                 """
             }
         }
 
         then {
-            def result = metacells(process.out.metacells[0][1])
+            def result = metacells(process.out.metacells[0].metacells)
             assertAll(
                 { assert process.success },
                 { assert process.out.metacells.size() == 1 },
                 // meta propagated; name from meta.id
-                { assert process.out.metacells[0][0] == [ id:'analysis1' ] },
-                { assert file(process.out.metacells[0][1]).name == 'analysis1.metacells.txt.gz' },
+                { assert process.out.metacells[0].meta == [ id:'analysis1' ] },
+                { assert file(process.out.metacells[0].metacells).name == 'analysis1.metacells.txt.gz' },
                 // gene_id per row, in features order
                 { assert result.genes == ['ENSG01', 'ENSG02', 'ENSG03'] },
                 // D1 = LIB_A_AAAA + LIB_A_CCCC; D2 = LIB_B_AAAA + LIB_B_TTTT (rows GENEA, GENEB, GENEC)
@@ -57,16 +57,16 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ],
-                    file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), file("${moduleDir}/tests/fixtures/features.tsv.gz"),
-                    file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
-                    [ 'donor', 'cell_type' ] ]
+                input[0] = record(meta: [ id:'analysis1' ],
+                    matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
+                    barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
+                    group_columns: [ 'donor', 'cell_type' ])
                 """
             }
         }
 
         then {
-            def result = metacells(process.out.metacells[0][1])
+            def result = metacells(process.out.metacells[0].metacells)
             assertAll(
                 { assert process.success },
                 { assert result.counts.keySet() == ['D1:Glut', 'D1:GABA', 'D2:Glut', 'D2:GABA'] as Set },
@@ -83,16 +83,16 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ],
-                    file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), file("${moduleDir}/tests/fixtures/features.tsv.gz"),
-                    file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
-                    [ 'donor' ] ]
+                input[0] = record(meta: [ id:'analysis1' ],
+                    matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
+                    barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
+                    group_columns: [ 'donor' ])
                 """
             }
         }
 
         then {
-            def result = metacells(process.out.metacells[0][1])
+            def result = metacells(process.out.metacells[0].metacells)
             assertAll(
                 { assert process.success },
                 // LIB_A_GGGG (no metadata row) and LIB_B_GGGG (empty donor) have 100/300 and 200/400 counts of GENEA/GENEC:
@@ -110,16 +110,16 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ],
-                    file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), file("${moduleDir}/tests/fixtures/features.tsv.gz"),
-                    file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
-                    [ 'donor', 'cell_type' ] ]
+                input[0] = record(meta: [ id:'analysis1' ],
+                    matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
+                    barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
+                    group_columns: [ 'donor', 'cell_type' ])
                 """
             }
         }
 
         then {
-            def result = metacells(process.out.metacells[0][1])
+            def result = metacells(process.out.metacells[0].metacells)
             assertAll(
                 { assert process.success },
                 // AAAA is LIB_A_AAAA (D1 Glut, GENEA 1) and LIB_B_AAAA (D2 Glut, GENEA 4): never merged or swapped
@@ -134,10 +134,10 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ],
-                    file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), file("${moduleDir}/tests/fixtures/features.tsv.gz"),
-                    file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
-                    [ 'donor', 'no_such_column' ] ]
+                input[0] = record(meta: [ id:'analysis1' ],
+                    matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
+                    barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
+                    group_columns: [ 'donor', 'no_such_column' ])
                 """
             }
         }

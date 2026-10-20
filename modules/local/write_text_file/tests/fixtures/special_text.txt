@@ -1,0 +1,6 @@
+--set
+donor
+N 1 $HOME 'r'
+--exclude
+  M_class_name
+"double" and a back\slash and a tab	here

@@ -1,10 +1,12 @@
+nextflow.enable.types = true
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { paramsSummaryMap       } from 'plugin/nf-schema'
-include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
+include { workflowVersionToYAML  } from '../subworkflows/nf-core/utils_nfcore_pipeline'
+include { Manifest               } from '../subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
 include { LOCATE_SCRNA_ARTIFACTS } from '../modules/local/locate_scrna_artifacts/main'
 include { FORMAT_MAPMYCELLS_ANNOTATIONS } from '../modules/local/format_mapmycells_annotations/main'
 include { BUILD_LIBRARY_CELL_METADATA } from '../modules/local/build_library_cell_metadata/main'
@@ -15,6 +17,54 @@ include { MAKE_TRIPLET_DGE } from '../modules/local/make_triplet_dge/main'
 include { DONOR_CELL_TYPE_REPORT } from '../modules/local/donor_cell_type_report/main'
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_CELL_TYPE_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
+include { WRITE_TEXT_FILE as WRITE_RESOLVED_SUMMARY } from '../modules/local/write_text_file/main'
+include { WRITE_TEXT_FILE as WRITE_ARGS_FILE } from '../modules/local/write_text_file/main'
+include { WRITE_TEXT_FILE as WRITE_CELL_TYPE_COLUMN } from '../modules/local/write_text_file/main'
+include { WRITE_TEXT_FILE as WRITE_VERSIONS } from '../modules/local/write_text_file/main'
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    RECORD TYPES (Manifest, the input of this workflow, is declared with the initialisation that makes it)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+// One library of the analysis, as LibraryResolver decided it is processed.
+//   id: the library id (artifact uei); the key the library's records are joined on. It is also meta.id.
+//   meta: [id, analysis_id, mmc_model ('NA' for none), position (0-based position in the manifest: the order libraries are merged)]
+//   dge, cell_metadata: gs:// or local paths as text; mmc_annotations: the MapMyCells result csv path as text, or 'NA' for none
+//   args, files: the join_and_filter_tsv arguments of the manifest entry, and the files they refer to ([] for none)
+record Library {
+    id: String
+    meta: Map
+    dge: String
+    cell_metadata: String
+    mmc_annotations: String
+    args: List<String>
+    files: List<String>
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    FUNCTIONS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+// The libraries of a resolver result (LibraryResolver.resolve) as Library records, in the order of the result (manifest order).
+// A function with a declared result type, so that the joins on the libraries are type checked.
+def toLibraries(result: Map) -> Iterable<Library> {
+    return result.libraries.keySet().collect { library_id ->
+        def library = result.libraries[library_id]
+        record(
+            id: library_id,
+            meta: [ id: library_id, analysis_id: result.analysisId, mmc_model: library.mmcModel, position: library.position ],
+            dge: library.dge,
+            cell_metadata: library.cellMetadata,
+            mmc_annotations: library.mmcAnnotations,
+            args: library.args,
+            files: library.files
+        )
+    }
+}
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -25,253 +75,212 @@ include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_CELL_TYPE_METACELLS } from '.
 workflow SCRNA_AGGREGATION {
 
     take:
-    ch_manifest // value channel: tuple val(meta), path(manifest); meta.id is the analysis id
-    ch_entries  // value channel: list of manifest entries [dge, donor, filters, joins], in manifest order
+    manifest: Value<Manifest>      // one item: the aggregation YAML
+    entries: Value<List<Map>>      // one item: the manifest entries [dge, donor, filters, joins], in manifest order
+    reference: String?             // --reference, the reference name that skips the same-reference check
+    mmc_model: String?             // --mmc_model, the MapMyCells model that replaces each library's first model
 
     main:
 
-    ch_versions = channel.empty()
+    // Input: manifest, one item. Emits: LOCATE_SCRNA_ARTIFACTS result, one item, record(meta, artifacts: a directory with one <uei>.yaml per DGE).
+    located = LOCATE_SCRNA_ARTIFACTS(manifest)
 
-    // Input: ch_manifest, one item, tuple val(meta), path(manifest) (the aggregation YAML).
-    // Emits: LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir, one item, tuple val(meta), path('artifacts'): a directory with one <uei>.yaml per DGE of the manifest
-    LOCATE_SCRNA_ARTIFACTS(ch_manifest)
-
-    // Input: artifacts_dir, one item, tuple val(meta), path(artifacts directory).
-    // Emits: one item, tuple val(meta), val(list of the YAML text of each <uei>.yaml): the resolver needs the content, not the files.
-    ch_artifact_texts = LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir.map { meta, dir -> [ meta, LibraryResolver.readArtifactTexts(dir) ] }
-
-    // Input: the artifact texts (one item), the manifest entries (one item, a list; wrapped in a list so that combine does not flatten it), and the
-    // optional --reference and --mmc_model. LibraryResolver.resolve matches each manifest entry with the artifacts of its library and decides what
-    // each library is processed from (see lib/LibraryResolver.groovy).
-    // Emits: one item, the resolver result Map [analysisId, libraries: [library id -> record], reducedGtf, reference]. A resolver error stops the run.
-    ch_resolved = ch_artifact_texts
-        .combine(ch_entries.map { entries -> [ entries ] })
-        .map { meta, artifact_texts, entries ->
+    // Input: located (one item) and entries (one item, appended as a field so that nothing is flattened) and the optional --reference and --mmc_model.
+    // LibraryResolver.resolve matches each manifest entry with the artifacts of its library and decides what each library is processed from
+    // (see lib/LibraryResolver.groovy).
+    // Emits: one item, the resolver result Map [analysisId, libraries: [library id -> library Map], reducedGtf, reference, hasDonors]. A resolver error stops the run.
+    resolved = located
+        .combine(entries: entries)
+        .map { item ->
             try {
-                def artifacts = artifact_texts.collect { text -> LibraryResolver.loadArtifact(text) }
-                LibraryResolver.resolve(entries, artifacts, meta.id, [ reference: params.reference ?: null, mmcModel: params.mmc_model ?: null ])
+                def artifacts = LibraryResolver.readArtifactTexts(item.artifacts).collect { text -> LibraryResolver.loadArtifact(text) }
+                LibraryResolver.resolve(item.entries, artifacts, item.meta.id, [ reference: reference, mmcModel: mmc_model ])
             } catch (IllegalArgumentException e) {
-                error("Cannot resolve the libraries of ${meta.id}: ${e.message}")
+                error("Cannot resolve the libraries of ${item.meta.id}: ${e.getMessage()}")
+                [:]   // not reached: error() stops the run; keeps the closure result a Map
             }
         }
 
     // Input: the resolver result, one item.
     // Emits: <analysis>.resolved_libraries.txt, plain text for a person to read: the files and arguments each library is processed with.
-    // Published to <outdir>/pipeline_info/; nothing reads it back.
-    ch_resolved.collectFile(storeDir: "${params.outdir}/pipeline_info") { result ->
-        [ "${result.analysisId}.resolved_libraries.txt", LibraryResolver.summaryText(result) ]
-    }
+    // Published to <outdir>/pipeline_info/ (conf/modules.config); nothing reads it back.
+    WRITE_RESOLVED_SUMMARY(resolved.map { result ->
+        record(name: "${result.analysisId}.resolved_libraries.txt", text: LibraryResolver.summaryText(result))
+    })
 
     // Input: the resolver result, one item.
-    // Emits: one item per library (scatter), tuple val(meta_lib), val(record); meta_lib = [id: library id, analysis_id, mmc_model ('NA' for none),
-    // position (0-based position in the manifest: the order in which libraries are merged)],
-    // record = [libraryId, position, dge, cellMetadata, mmcModel, mmcAnnotations ('NA' for none), args (List<String>), files (List<String>, [] for none)].
-    ch_libraries = ch_resolved.flatMap { result ->
-        result.libraries.collect { library_id, record ->
-            [ [ id: library_id, analysis_id: result.analysisId, mmc_model: record.mmcModel, position: record.position ], record ]
+    // Emits: one item per library (scatter), Library; meta.position is the position in the manifest (the order in which libraries are merged).
+    libraries = resolved.flatMap { result -> toLibraries(result) }
+
+    // Input: located, one item. Emits: one item per artifact YAML (scatter), record(id: library id (the file name without .yaml), yaml: path).
+    artifact_files = located.flatMap { item ->
+        item.artifacts.listFiles().findAll { f -> f.name.endsWith(".yaml") }.collect { f -> record(id: f.name.replace('.yaml', ''), yaml: f) }
+    }
+
+    // Input: libraries (Library) and artifact_files, joined on id. A library without an artifact YAML would be dropped: the resolver already failed then.
+    // Emits: one item per library, record(meta: meta_lib, artifacts_yaml: path); each library gets its own YAML.
+    library_artifacts = libraries
+        .join(artifact_files, by: 'id')
+        .map { item -> record(meta: item.meta, artifacts_yaml: item.yaml) }
+
+    // Input: record(meta: meta_lib, artifacts_yaml), one item per library.
+    // Emits: SUMMARIZE_SCRNA_EXPERIMENTS result, one item per library, record(meta: meta_lib, metrics: path (one row), tearsheet: path); the tearsheet is published.
+    summaries = SUMMARIZE_SCRNA_EXPERIMENTS(library_artifacts)
+
+    // Input: summaries, one item per library. Emits: one item, record(meta: [id: analysis id], tsvs: the metrics files in manifest order).
+    metrics_sorted = summaries
+        .collect()
+        .map { items ->
+            def sorted = items.toSorted { a, b -> a.meta.position <=> b.meta.position }
+            record(meta: [ id: sorted[0].meta.analysis_id ], tsvs: sorted.collect { item -> item.metrics }.toList())
         }
-    }
 
-    // Input: LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir, one item, tuple val(meta), path(artifacts directory).
-    // Emits: one item per artifact YAML (scatter), tuple val(library id), path('<library id>.yaml'); the file name is the library id (artifact uei).
-    ch_artifact_files = LOCATE_SCRNA_ARTIFACTS.out.artifacts_dir.flatMap { _meta, dir ->
-        dir.listFiles().findAll { f -> f.name.endsWith(".yaml") }.collect { f -> [ f.name - '.yaml', f ] }
-    }
+    // Input: one item, record(meta, tsvs). Emits: MERGE_LIBRARY_METRICS result, one item, record(meta, combined: path('<analysis>.library_metrics.txt')).
+    MERGE_LIBRARY_METRICS(metrics_sorted)
 
-    // Input: ch_libraries (tuple val(meta_lib), val(record), keyed by meta_lib.id) and ch_artifact_files (tuple val(library id), path(yaml)).
-    // Emits: one item per library, tuple val(meta_lib), path(artifact yaml); joined on library id, so each library gets its own YAML.
-    // A library without an artifact YAML would be dropped by join: the resolver already failed in that case.
-    ch_library_artifacts = ch_libraries
-        .map { meta_lib, _record -> [ meta_lib.id, meta_lib ] }
-        .join(ch_artifact_files)
-        .map { _library_id, meta_lib, yaml -> [ meta_lib, yaml ] }
+    // Input: libraries, one item per library. Emits: one item per library, record(id: library id, args_file: path('<library>.join_and_filter_args.txt')):
+    // the arguments one per line, written in the work directory (not published). Libraries with no arguments get an empty file.
+    args_files = WRITE_ARGS_FILE(libraries.map { library ->
+        record(name: LibraryResolver.argsFileName(library.id), text: JoinFilterArguments.toArgsFileText(library.args))
+    }).map { f -> record(id: f.name.replace('.join_and_filter_args.txt', ''), args_file: f) }
 
-    // Input: tuple val(meta_lib), path(artifact yaml), one item per library.
-    // Emits: SUMMARIZE_SCRNA_EXPERIMENTS.out.metrics (tuple val(meta_lib), path('<library>.library_metrics.txt'), one row each) and
-    // .tearsheet (tuple val(meta_lib), path('tearsheets/<library>.standard_analysis_tearsheet.txt')), one item per library.
-    SUMMARIZE_SCRNA_EXPERIMENTS(ch_library_artifacts)
+    // Input: libraries, filtered to the libraries that have MapMyCells results (mmc_annotations != 'NA').
+    // Emits: one item per such library, record(meta: meta_lib, csv: path(MapMyCells result csv)); the csv is localized from its gs:// path.
+    mmc_csv = libraries
+        .filter { library -> library.mmc_annotations != LibraryResolver.NA }
+        .map { library -> record(meta: library.meta, csv: file(library.mmc_annotations)) }
 
-    // Input: SUMMARIZE_SCRNA_EXPERIMENTS.out.metrics, one item per library, tuple val(meta_lib), path(metrics).
-    // Emits: one item, tuple val(meta) with meta.id = analysis id, path(list of metrics files in manifest order): the merge order is the input order.
-    // toSortedList returns one list of the tuples (not flattened); the map reshapes it.
-    ch_metrics_sorted = SUMMARIZE_SCRNA_EXPERIMENTS.out.metrics
-        .toSortedList { a, b -> a[0].position <=> b[0].position }
-        .map { items -> [ [ id: items[0][0].analysis_id ], items.collect { item -> item[1] } ] }
+    // Input: record(meta: meta_lib, csv), one item per library with MapMyCells results.
+    // Emits: FORMAT_MAPMYCELLS_ANNOTATIONS result, one item per such library, record(meta: meta_lib, converted: path (not published), cell_type_column: String).
+    annotations = FORMAT_MAPMYCELLS_ANNOTATIONS(mmc_csv)
 
-    // Input: one item, tuple val(meta), path(metrics files, in manifest order).
-    // Emits: MERGE_LIBRARY_METRICS.out.combined, one item, tuple val(meta), path('<analysis>.library_metrics.txt') (ext.prefix in conf/modules.config).
-    MERGE_LIBRARY_METRICS(ch_metrics_sorted)
-
-    // Input: ch_libraries, one item per library, tuple val(meta_lib), val(record); record.args is the list of join_and_filter_tsv arguments.
-    // Emits: one item per library, tuple val(library id), path('<library>.join_and_filter_args.txt'): the arguments one per line, written by
-    // collectFile in the work directory (not published). Libraries with no arguments get an empty file.
-    ch_args_files = ch_libraries
-        .collectFile { meta_lib, record -> [ LibraryResolver.argsFileName(meta_lib.id), JoinFilterArguments.toArgsFileText(record.args) ] }
-        .map { f -> [ f.name - '.join_and_filter_args.txt', f ] }
-
-    // Input: ch_libraries, filtered to the libraries that have MapMyCells results (record.mmcAnnotations != 'NA').
-    // Emits: one item per such library, tuple val(meta_lib), path(MapMyCells result csv); the csv is localized from its gs:// path.
-    ch_mmc_csv = ch_libraries
-        .filter { _meta_lib, record -> record.mmcAnnotations != LibraryResolver.NA }
-        .map { meta_lib, record -> [ meta_lib, file(record.mmcAnnotations) ] }
-
-    // Input: tuple val(meta_lib), path(csv), one item per library with MapMyCells results.
-    // Emits: .converted (tuple val(meta_lib), path('<library>.mmc.tsv'), not published) and .cell_type_column (tuple val(meta_lib), val(column name)).
-    FORMAT_MAPMYCELLS_ANNOTATIONS(ch_mmc_csv)
-
-    // Input: .cell_type_column, one item per library with MapMyCells results, tuple val(meta_lib), val(column).
-    // Emits: one item (value channel), val(the cell type column shared by all libraries, or '' if no library has MapMyCells results);
+    // Input: annotations, one item per library with results.
+    // Emits: one item (value), String: the cell type column shared by all libraries, or '' if no library has MapMyCells results;
     // LibraryResolver.checkCellTypeColumn fails the run if the libraries disagree.
-    ch_cell_type_column = FORMAT_MAPMYCELLS_ANNOTATIONS.out.cell_type_column
-        .toList()
-        .map { items -> LibraryResolver.checkCellTypeColumn(items.collectEntries { meta_lib, column -> [ (meta_lib.id): column ] }) ?: '' }
+    cell_type_column = annotations
+        .collect()
+        .map { items -> LibraryResolver.checkCellTypeColumn(items.collect { item -> item.meta.id }.toList(), items.collect { item -> item.cell_type_column }.toList()) ?: '' }
 
-    // Input: ch_cell_type_column (one value), ch_libraries (only for the analysis id).
+    // Input: cell_type_column (one value) and the analysis id from the resolver result.
     // Emits: <analysis>.cell_type_column.txt, one file with the column name, published to <outdir>; nothing if there is no column.
-    ch_cell_type_column
-        .filter { column -> column }
-        .combine(ch_libraries.first().map { meta_lib, _record -> meta_lib.analysis_id })
-        .collectFile(storeDir: params.outdir, newLine: true) { column, analysis_id -> [ "${analysis_id}.cell_type_column.txt", column ] }
+    WRITE_CELL_TYPE_COLUMN(
+        cell_type_column
+            .map { column -> record(column: column) }
+            .combine(analysis_id: resolved.map { result -> result.analysisId })
+            .flatMap { item -> item.column ? [ item ] : [] }
+            .map { item -> record(name: "${item.analysis_id}.cell_type_column.txt", text: item.column + '\n') }
+    )
 
-    // Input: ch_libraries, one item per library, tuple val(meta_lib), val(record).
-    // Emits: tuple val(library id), val(meta_lib), path(cell metadata), val(list of extra files to stage, [] for none).
-    ch_build_base = ch_libraries.map { meta_lib, record ->
-        [ meta_lib.id, meta_lib, file(record.cellMetadata), record.files.collect { f -> file(f) } ]
-    }
+    // Input: libraries (all), the MapMyCells TSV of the libraries with results, and the args files.
+    // Emits: one item per library, Library plus mmc_tsv (path, or null for a library without MapMyCells results) and args_file (path).
+    mmc_tsvs = annotations
+        .map { item -> record(id: item.meta.id, mmc_tsv: item.converted) }
+        .mix(
+            libraries
+                .filter { library -> library.mmc_annotations == LibraryResolver.NA }
+                .map { library -> record(id: library.id, mmc_tsv: null as Path) }
+        )
+    libraries_with_mmc = libraries.join(mmc_tsvs, by: 'id')
 
-    // Input: FORMAT_MAPMYCELLS_ANNOTATIONS.out.converted, one item per library with results, tuple val(meta_lib), path(mmc tsv).
-    // Emits: tuple val(library id), path(mmc tsv), keyed so it can be joined with ch_build_base.
-    ch_mmc_tsv_by_id = FORMAT_MAPMYCELLS_ANNOTATIONS.out.converted.map { meta_lib, tsv -> [ meta_lib.id, tsv ] }
+    // Input: libraries_with_mmc and args_files, joined on id.
+    // Emits: one item per library, record(meta: meta_lib, cell_metadata: path, mmc_tsv: path or null, args_file: path, extra_files: list of paths, [] for none):
+    // the exact input of BUILD_LIBRARY_CELL_METADATA.
+    build_input = libraries_with_mmc
+        .join(args_files, by: 'id')
+        .map { item ->
+            record(
+                meta: item.meta,
+                cell_metadata: file(item.cell_metadata),
+                mmc_tsv: item.mmc_tsv,
+                args_file: item.args_file,
+                extra_files: item.files.collect { f -> file(f) }.toList()
+            )
+        }
 
-    // Input: ch_build_base (all libraries), ch_mmc_tsv_by_id (libraries with results; remainder: true keeps the others with a null), ch_args_files.
-    // Emits: one item per library, tuple val(meta_lib), path(cell metadata), path(mmc tsv or []), path(args file), path(extra files or []):
-    // the exact input of BUILD_LIBRARY_CELL_METADATA, with [] placeholders for the optional paths.
-    ch_build_input = ch_build_base
-        .join(ch_mmc_tsv_by_id, remainder: true)
-        .join(ch_args_files)
-        .map { _id, meta_lib, cell_metadata, extra_files, mmc_tsv, args_file -> [ meta_lib, cell_metadata, mmc_tsv ?: [], args_file, extra_files ] }
+    // Input: build_input. Emits: BUILD_LIBRARY_CELL_METADATA result, one item per library, record(meta: meta_lib, cell_metadata: path('<library>.joined_filtered_cell_metadata.txt')).
+    built = BUILD_LIBRARY_CELL_METADATA(build_input)
 
-    // Input: tuple val(meta_lib), path(cell metadata), path(mmc tsv or []), path(args file), path(extra files or []), one item per library.
-    // Emits: BUILD_LIBRARY_CELL_METADATA.out.cell_metadata, tuple val(meta_lib), path('<library>.joined_filtered_cell_metadata.txt'), one item per library.
-    BUILD_LIBRARY_CELL_METADATA(ch_build_input)
-
-    // Input: BUILD_LIBRARY_CELL_METADATA.out.cell_metadata, one item per library, tuple val(meta_lib), path(joined and filtered cell metadata);
-    // ch_libraries, for the DGE each library is processed from (record.dge: the DGE the manifest names, localized from its gs:// path).
-    // Emits: ONE list with one element per library, in manifest order (meta_lib.position): [library id, meta_lib, path(cell metadata), path(DGE)].
+    // Input: built (one item per library) and libraries, for the DGE each library is processed from (the DGE the manifest names, localized from its gs:// path).
+    // Emits: ONE list with one record per library, in manifest order (meta.position): record(id, meta, cell_metadata: path, dge: path).
     // Both the merged cell metadata and the sparse DGE are made from this one list, so the rows of the merged metadata and the columns of the
     // matrix are in the same library order, and the i-th prefix, DGE and barcode list always belong to the same library.
-    ch_built_sorted = BUILD_LIBRARY_CELL_METADATA.out.cell_metadata
-        .map { meta_lib, cell_metadata -> [ meta_lib.id, meta_lib, cell_metadata ] }
-        .join(ch_libraries.map { meta_lib, record -> [ meta_lib.id, file(record.dge) ] })
-        .toSortedList { a, b -> a[1].position <=> b[1].position }
+    built_sorted = built
+        .map { item -> record(id: item.meta.id, meta: item.meta, cell_metadata: item.cell_metadata) }
+        .join(libraries.map { library -> record(id: library.id, dge: file(library.dge)) }, by: 'id')
+        .collect()
+        .map { items -> items.toSorted { a, b -> a.meta.position <=> b.meta.position } }
 
-    // Input: ch_built_sorted, one list of [library id, meta_lib, cell metadata, DGE].
-    // Emits: one item, tuple val(meta) with meta.id = analysis id, path(list of the per-library cell metadata files, in manifest order).
-    ch_cell_metadata_files = ch_built_sorted.map { items ->
-        [ [ id: items[0][1].analysis_id ], items.collect { item -> item[2] } ]
+    // Input: built_sorted. Emits: one item, record(meta: [id: analysis id], tsvs: the per-library cell metadata files, in manifest order).
+    cell_metadata_files = built_sorted.map { items ->
+        record(meta: [ id: items[0].meta.analysis_id ], tsvs: items.collect { item -> item.cell_metadata }.toList())
     }
 
-    // Input: one item, tuple val(meta), path(per-library cell metadata files in manifest order).
-    // Emits: MERGE_CELL_METADATA.out.combined, one item, tuple val(meta), path('<analysis>.cell_metadata.txt'), indexed by (PREFIX, cell_barcode):
-    // a duplicate cell fails the task (ext.args and ext.prefix in conf/modules.config).
-    MERGE_CELL_METADATA(ch_cell_metadata_files)
+    // Input: one item, record(meta, tsvs). Emits: MERGE_CELL_METADATA result, one item, record(meta, combined: path('<analysis>.cell_metadata.txt')),
+    // indexed by (PREFIX, cell_barcode): a duplicate cell fails the task (ext.args and ext.prefix in conf/modules.config).
+    merged_cell_metadata = MERGE_CELL_METADATA(cell_metadata_files)
 
-    // Input: ch_built_sorted.
-    // Emits: one item, tuple val(meta) with meta.id = analysis id, val(list of prefixes = library ids), path(list of DGEs), path(list of barcode lists);
-    // the three lists have one element per library, in the same (manifest) order.
-    ch_triplet_input = ch_built_sorted.map { items ->
-        [ [ id: items[0][1].analysis_id ], items.collect { item -> item[0] }, items.collect { item -> item[3] }, items.collect { item -> item[2] } ]
+    // Input: built_sorted. Emits: one item, record(meta: [id: analysis id], prefixes: library ids, dges: paths, barcode_lists: paths), each list in manifest order.
+    triplet_input = built_sorted.map { items ->
+        record(
+            meta: [ id: items[0].meta.analysis_id ],
+            prefixes: items.collect { item -> item.id }.toList(),
+            dges: items.collect { item -> item.dge }.toList(),
+            barcode_lists: items.collect { item -> item.cell_metadata }.toList()
+        )
     }
 
-    // Input: the resolver result, one item.
-    // Emits: one item (value), path(reduced GTF), localized from its gs:// path; every library has the same one (checked by the resolver).
-    ch_reduced_gtf = ch_resolved.map { result -> file(result.reducedGtf) }
+    // Input: the resolver result, one item. Emits: one item (value), path(reduced GTF), localized from its gs:// path; every library has the same one.
+    reduced_gtf = resolved.map { result -> file(result.reducedGtf) }
 
-    // Input: ch_triplet_input and ch_reduced_gtf, one item each.
-    // Emits: MAKE_TRIPLET_DGE.out.matrix, .barcodes and .features, each one item, tuple val(meta), path(matrix.mtx.gz / barcodes.tsv.gz / features.tsv.gz):
-    // genes x the cells of all libraries (barcodes are <library id>_<cell barcode>), in library order.
-    MAKE_TRIPLET_DGE(ch_triplet_input, ch_reduced_gtf)
+    // Input: triplet_input and reduced_gtf, one item each.
+    // Emits: MAKE_TRIPLET_DGE result, one item, record(meta, matrix, barcodes, features): genes x the cells of all libraries (barcodes are
+    // <library id>_<cell barcode>), in library order.
+    triplet = MAKE_TRIPLET_DGE(triplet_input, reduced_gtf)
 
     // The donor steps need donors, which the resolver knows from the manifest and the artifacts (all libraries have donors or none do), and the
     // cell type steps also need a cell type column (some library has MapMyCells results). A missing piece skips the steps with a warning.
-    // Input: the resolver result (one item) and ch_cell_type_column (one value, '' for none).
-    // Emits: ch_donors, one item (true) only if the libraries have donors, else nothing; ch_cell_type, one item (the column name) only if there is one.
-    ch_donors = ch_resolved.filter { result -> result.hasDonors }.map { _result -> true }
-    ch_cell_type = ch_cell_type_column.filter { column -> column }
-    ch_resolved.filter { result -> !result.hasDonors }.subscribe { result ->
-        log.warn "The libraries of ${result.analysisId} have no donors (no donor in the manifest, no village in the artifacts): no donor reports or metacells"
+    resolved.subscribe { result ->
+        if (!result.hasDonors) {
+            log.warn "The libraries of ${result.analysisId} have no donors (no donor in the manifest, no village in the artifacts): no donor reports or metacells"
+        }
     }
-    ch_cell_type_column.filter { column -> !column }.subscribe { _column ->
-        log.warn "No library has MapMyCells results: no donor by cell type report or metacells"
+    cell_type_column.subscribe { column ->
+        if (!column) {
+            log.warn "No library has MapMyCells results: no donor by cell type report or metacells"
+        }
     }
 
-    // Input: MAKE_TRIPLET_DGE.out.matrix, .features and .barcodes and MERGE_CELL_METADATA.out.combined, each one item, tuple val(meta), path(file);
-    // meta is [id: analysis id] in all of them. Combined with ch_donors, so nothing is emitted for libraries without donors.
-    // Emits: one item, tuple val(meta), path(matrix), path(features), path(barcodes), path(merged cell metadata).
-    ch_metacell_inputs = MAKE_TRIPLET_DGE.out.matrix
-        .join(MAKE_TRIPLET_DGE.out.features)
-        .join(MAKE_TRIPLET_DGE.out.barcodes)
-        .join(MERGE_CELL_METADATA.out.combined)
-        .combine(ch_donors)
-        .map { meta, matrix, features, barcodes, cell_metadata, _donors -> [ meta, matrix, features, barcodes, cell_metadata ] }
+    // Input: triplet (one item), merged_cell_metadata (one item) and the resolver result (donors yes or no).
+    // Emits: one item only with donors, record(meta, matrix, features, barcodes, cell_metadata: path(merged cell metadata)).
+    metacell_inputs = triplet
+        .combine(cell_metadata: merged_cell_metadata.map { item -> item.combined })
+        .combine(has_donors: resolved.map { result -> result.hasDonors })
+        .flatMap { item -> item.has_donors ? [ item ] : [] }
 
-    // Input: ch_metacell_inputs (one item, only with donors).
-    // Emits: DONOR_METACELLS.out.metacells, one item, tuple val(meta), path('<analysis>.donors.metacells.txt.gz'): expression summed per donor.
-    DONOR_METACELLS(ch_metacell_inputs.map { meta, matrix, features, barcodes, cell_metadata -> [ meta, matrix, features, barcodes, cell_metadata, [ 'donor' ] ] })
+    // Input: metacell_inputs (one item, only with donors).
+    // Emits: DONOR_METACELLS result, one item, record(meta, metacells: path('<analysis>.donors.metacells.txt.gz')): expression summed per donor.
+    DONOR_METACELLS(metacell_inputs.map { item ->
+        record(meta: item.meta, matrix: item.matrix, features: item.features, barcodes: item.barcodes, cell_metadata: item.cell_metadata, group_columns: [ 'donor' ])
+    })
 
-    // Input: ch_metacell_inputs and ch_cell_type, so one item only with donors and a cell type column.
-    // Emits: DONOR_CELL_TYPE_METACELLS.out.metacells, one item, tuple val(meta), path('<analysis>.donor_cell_type.metacells.txt.gz'): expression summed
+    // Input: metacell_inputs and cell_type_column, so one item only with donors and a cell type column.
+    // Emits: DONOR_CELL_TYPE_METACELLS result, one item, record(meta, metacells: path('<analysis>.donor_cell_type.metacells.txt.gz')): expression summed
     // per donor and cell type.
-    DONOR_CELL_TYPE_METACELLS(
-        ch_metacell_inputs.combine(ch_cell_type).map { meta, matrix, features, barcodes, cell_metadata, column ->
-            [ meta, matrix, features, barcodes, cell_metadata, [ 'donor', column ] ]
-        }
-    )
+    cell_type_inputs = metacell_inputs
+        .combine(column: cell_type_column)
+        .flatMap { item -> item.column ? [ item ] : [] }
+    DONOR_CELL_TYPE_METACELLS(cell_type_inputs.map { item ->
+        record(meta: item.meta, matrix: item.matrix, features: item.features, barcodes: item.barcodes, cell_metadata: item.cell_metadata, group_columns: [ 'donor', item.column ])
+    })
 
-    // Input: MERGE_CELL_METADATA.out.combined (one item), ch_donors and ch_cell_type, so one item only with donors and a cell type column.
-    // Emits: DONOR_CELL_TYPE_REPORT.out.report, one item, tuple val(meta), path('<analysis>.donor_cell_type.txt'): the cells and median UMIs per donor
+    // Input: cell_type_inputs (one item only with donors and a cell type column).
+    // Emits: DONOR_CELL_TYPE_REPORT result, one item, record(meta, report: path('<analysis>.donor_cell_type.txt')): the cells and median UMIs per donor
     // and cell type.
-    DONOR_CELL_TYPE_REPORT(
-        MERGE_CELL_METADATA.out.combined.combine(ch_donors).combine(ch_cell_type).map { meta, cell_metadata, _donors, column -> [ meta, cell_metadata, column ] }
-    )
+    DONOR_CELL_TYPE_REPORT(cell_type_inputs.map { item ->
+        record(meta: item.meta, cell_metadata: item.cell_metadata, cell_type_column: item.column)
+    })
 
-    //
-    // Collate and save software versions
-    //
-    def topic_versions = Channel.topic("versions")
-        .distinct()
-        .branch { entry ->
-            versions_file: entry instanceof Path
-            versions_tuple: true
-        }
-
-    def topic_versions_string = topic_versions.versions_tuple
-        .map { process, tool, version ->
-            [ process[process.lastIndexOf(':')+1..-1], "  ${tool}: ${version}" ]
-        }
-        .groupTuple(by:0)
-        .map { process, tool_versions ->
-            tool_versions.unique().sort()
-            "${process}:\n${tool_versions.join('\n')}"
-        }
-
-    softwareVersionsToYAML(ch_versions.mix(topic_versions.versions_file))
-        .mix(topic_versions_string)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name:  'scrna-aggregation_software_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
-
-
-    emit:
-    versions       = ch_versions                 // channel: [ path(versions.yml) ]
-
+    // Emits: pipeline_info/scrna-aggregation_software_versions.yml: the pipeline and Nextflow versions. The tool versions are the image tags
+    // hard coded in the modules, so no process reports a version.
+    WRITE_VERSIONS(channel.value(record(name: 'scrna-aggregation_software_versions.yml', text: workflowVersionToYAML().trim() + '\n')))
 }
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    THE END
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/

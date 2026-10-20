@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 process LOCATE_SCRNA_ARTIFACTS {
     tag "$meta.id"
     label 'process_single'
@@ -7,11 +9,17 @@ process LOCATE_SCRNA_ARTIFACTS {
 
     input:
     // meta.id is the aggregation analysis id; manifest is the YAML manifest with a top-level 'dges' list
-    tuple val(meta), path(manifest)
+    record(
+        meta: Map,
+        manifest: Path
+    )
 
     output:
     // directory 'artifacts' holding one <uei>.yaml per manifest DGE (one process run, one directory out)
-    tuple val(meta), path("artifacts"), emit: artifacts_dir
+    artifacts_dir = record(
+        meta: meta,
+        artifacts: file("artifacts")
+    )
 
     script:
     def args = task.ext.args ?: ''

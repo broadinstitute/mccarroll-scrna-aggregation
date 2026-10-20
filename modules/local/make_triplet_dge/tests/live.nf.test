@@ -31,7 +31,9 @@ nextflow_process {
             def gtf = "${root}/tmp/${new File(rows[0].reduced_gtf).name}"
             process {
                 """
-                input[0] = [ [ id:'live_analysis' ], [ ${prefixes} ], [ ${dges} ], [ ${barcodeLists} ] ]
+                input[0] = record(meta: [ id:'live_analysis' ], prefixes: [ ${prefixes} ],
+                    dges: [ ${dges} ],
+                    barcode_lists: [ ${barcodeLists} ])
                 input[1] = file('${gtf}')
                 """
             }
@@ -43,7 +45,7 @@ nextflow_process {
             def failures = []
             println ""
             outputs.each { emit, name ->
-                def generated = file(process.out[emit][0][1])
+                def generated = file(process.out.triplet[0][emit])
                 def baseline = new File(root, name)
                 println "${emit}:"
                 println "  Generated: ${generated}"

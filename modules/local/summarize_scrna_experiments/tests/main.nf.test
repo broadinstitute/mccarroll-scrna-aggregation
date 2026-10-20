@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "summarize_scrna_experiments"
 
-    // Contract: tuple val(meta), path(artifacts_yaml) -> metrics: tuple val(meta), path('<id>.library_metrics.txt'),
-    //   tearsheet: tuple val(meta), path('tearsheets/<id>.standard_analysis_tearsheet.txt').
+    // Contract: record(meta: Map, artifacts_yaml: Path) -> summary: record(meta: Map, metrics: Path '<id>.library_metrics.txt',
+    //   tearsheet: Path 'tearsheets/<id>.standard_analysis_tearsheet.txt').
     // meta.id is the library id (uei); meta.analysis_id is the analysis id. The real-data check is in gcs.nf.test.
     // Fixtures (tests/fixtures; the tool reads the files the YAML points at, mounted at /fixtures):
     //   LIB_FULL: small real files: properties (experimentDate 2024-01-02), execution trace dated 2026-03-04 (TASK_B failed
@@ -29,23 +29,23 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_FULL', analysis_id:'test_analysis' ], file("${moduleDir}/tests/fixtures/LIB_FULL.yaml") ]
+                input[0] = record(meta: [ id:'LIB_FULL', analysis_id:'test_analysis' ], artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_FULL.yaml"))
                 """
             }
         }
 
         then {
-            def metricsFile = file(process.out.metrics[0][1])
-            def tearsheetFile = file(process.out.tearsheet[0][1])
+            def metricsFile = file(process.out.summary[0].metrics)
+            def tearsheetFile = file(process.out.summary[0].tearsheet)
             def rows = parseTsv(metricsFile.text)
             def header = metricsFile.readLines()[0].split('\t', -1) as List
             assertAll(
                 { assert process.success },
                 // one item per emit, same meta (id and analysis_id) on both
-                { assert process.out.metrics.size() == 1 },
-                { assert process.out.tearsheet.size() == 1 },
-                { assert process.out.metrics[0][0] == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
-                { assert process.out.tearsheet[0][0] == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
+                { assert process.out.summary.size() == 1 },
+                { assert process.out.summary.size() == 1 },
+                { assert process.out.summary[0].meta == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
+                { assert process.out.summary[0].meta == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
                 // names come from meta.id
                 { assert metricsFile.name == 'LIB_FULL.library_metrics.txt' },
                 { assert tearsheetFile.name == 'LIB_FULL.standard_analysis_tearsheet.txt' },
@@ -78,15 +78,15 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_NA', analysis_id:'test_analysis' ], file("${moduleDir}/tests/fixtures/LIB_NA.yaml") ]
+                input[0] = record(meta: [ id:'LIB_NA', analysis_id:'test_analysis' ], artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_NA.yaml"))
                 """
             }
         }
 
         then {
-            def metricsFile = file(process.out.metrics[0][1])
+            def metricsFile = file(process.out.summary[0].metrics)
             def rows = parseTsv(metricsFile.text)
-            def tearsheetFile = file(process.out.tearsheet[0][1])
+            def tearsheetFile = file(process.out.summary[0].tearsheet)
             // columns that are known without any artifact; every other column must be NA
             def known = ['library', 'reference', 'standard_analysis_dir']
             assertAll(

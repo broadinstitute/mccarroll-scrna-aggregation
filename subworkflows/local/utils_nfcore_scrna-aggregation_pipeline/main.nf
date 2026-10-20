@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 //
 // Subworkflow with functionality specific to the mccarroll/scrna-aggregation pipeline
 //
@@ -17,6 +19,18 @@ include { UTILS_NEXTFLOW_PIPELINE   } from '../../nf-core/utils_nextflow_pipelin
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    RECORD TYPES
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+// The aggregation manifest: meta.id is the analysis id (the same for every run-level process).
+record Manifest {
+    meta: Map
+    manifest: Path
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW TO INITIALISE PIPELINE
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -24,20 +38,18 @@ include { UTILS_NEXTFLOW_PIPELINE   } from '../../nf-core/utils_nextflow_pipelin
 workflow PIPELINE_INITIALISATION {
 
     take:
-    version           // boolean: Display version and exit
-    validate_params   // boolean: Boolean whether to validate parameters against the schema at runtime
-    monochrome_logs   // boolean: Do not use coloured log outputs
-    nextflow_cli_args //   array: List of positional nextflow CLI args
-    outdir            //  string: The output directory where the results will be saved
-    manifest          //  string: Path to the aggregation manifest (YAML)
-    analysis_id       //  string: Label of this aggregation
-    help              // boolean: Display help message and exit
-    help_full         // boolean: Show the full help message
-    show_hidden       // boolean: Show hidden parameters in the help message
+    version: Boolean            // Display version and exit
+    validate_params: Boolean    // Whether to validate parameters against the schema at runtime
+    _monochrome_logs: Boolean   // Do not use coloured log outputs (unused here)
+    nextflow_cli_args: List<String>   // List of positional nextflow CLI args
+    outdir: String?             // The output directory where the results will be saved
+    manifest: String?           // Path to the aggregation manifest (YAML)
+    analysis_id: String?        // Label of this aggregation
+    help: String?               // Display help message and exit (the name of a parameter to describe)
+    help_full: Boolean          // Show the full help message
+    show_hidden: Boolean        // Show hidden parameters in the help message
 
     main:
-
-    ch_versions = channel.empty()
 
     //
     // Fail before any process starts if a local docker run has no usable GCP credentials file to mount
@@ -58,6 +70,17 @@ workflow PIPELINE_INITIALISATION {
     // Validate parameters and generate parameter summary to stdout
     //
     command = "nextflow run ${workflow.manifest.name} -profile <docker/singularity/.../institute> --manifest manifest.yaml --analysis_id <ID> --outdir <OUTDIR>"
+
+    // A bare --help reaches params.help as the string 'true', which the nf-core help code below takes for the name of a parameter and fails on
+    // ("Specified param 'true' does not exist in JSON schema"). Print the general help here instead, with the same options as that code.
+    // --help <parameter name> and --help_full are left to the nf-core code.
+    if (help == 'true') {
+        log.info paramsHelp(
+            [ beforeText: "", afterText: "", command: command, showHidden: show_hidden, fullHelp: false ],
+            ""
+        )
+        exit(0, "")
+    }
 
     UTILS_NFSCHEMA_PLUGIN (
         workflow,
@@ -88,15 +111,14 @@ workflow PIPELINE_INITIALISATION {
     ch_entries = channel.value(manifest_entries)
 
     //
-    // Input: params.manifest and params.analysis_id. Emits: ch_manifest, a value channel with one item, tuple val(meta), path(manifest), where
+    // Input: params.manifest and params.analysis_id. Emits: ch_manifest, a value channel with one item, a Manifest record, where
     // meta.id is the analysis id (the same for every run-level process)
     //
-    ch_manifest = channel.value([ [ id: analysis_id ], file(manifest) ])
+    ch_manifest = channel.value(record(meta: [ id: analysis_id ], manifest: file(manifest)))
 
     emit:
-    manifest    = ch_manifest   // value channel: tuple val(meta), path(manifest)
-    entries     = ch_entries    // value channel: List of manifest entries (maps)
-    versions    = ch_versions
+    manifest: Value<Manifest> = ch_manifest    // one item: record(meta: [id: analysis id], manifest: path)
+    entries: Value<List<Map>> = ch_entries     // one item: the list of manifest entries (maps), in manifest order
 }
 
 /*
@@ -108,12 +130,10 @@ workflow PIPELINE_INITIALISATION {
 workflow PIPELINE_COMPLETION {
 
     take:
-    outdir          //    path: Path to output directory where results will be published
-    monochrome_logs // boolean: Disable ANSI colour codes in log output
+    _outdir: String?          // Path to output directory where results will be published (unused here)
+    monochrome_logs: Boolean  // Disable ANSI colour codes in log output
 
     main:
-    summary_params = paramsSummaryMap(workflow, parameters_schema: "nextflow_schema.json")
-
     //
     // Completion email and summary
     //
@@ -143,7 +163,7 @@ workflow PIPELINE_COMPLETION {
 //   projectId:       value of the GOOGLE_PROJECT_ID environment variable (null or empty if unset). The Google
 //                    storage client needs a project; an authorized_user file has none, a service_account key does.
 //
-def checkLocalGcpCredentials(String profile, String credentialsFile, String projectId) {
+def checkLocalGcpCredentials(profile: String, credentialsFile: String, projectId: String?) {
     if (!profile.tokenize(',').contains('docker')) {
         return
     }
@@ -156,7 +176,7 @@ def checkLocalGcpCredentials(String profile, String credentialsFile, String proj
     def json
     try {
         json = new groovy.json.JsonSlurper().parseText(credentials.text)
-    } catch (Exception e) {
+    } catch (Exception _e) {
         json = null
     }
     if (!(json instanceof Map)) {
@@ -170,7 +190,7 @@ def checkLocalGcpCredentials(String profile, String credentialsFile, String proj
         error("GCP credentials file '${credentialsFile}' has unsupported credential type '${json.type}'; " +
             "expected one of ${requiredFields.keySet().join(', ')}.")
     }
-    def missing = requiredFields[json.type].findAll { !json[it] }
+    def missing = requiredFields[json.type].findAll { field -> !json[field] }
     if (missing) {
         error("GCP credentials file '${credentialsFile}' (${json.type}) is missing required field(s): ${missing.join(', ')}.")
     }
@@ -187,7 +207,7 @@ def checkLocalGcpCredentials(String profile, String credentialsFile, String proj
 //            entry; see lib/AggregationManifest.groovy. Also checks that the files of each entry can be staged (lib/JoinFilterArguments.groovy).
 //            Calls error() naming the path and the problem if invalid.
 //
-def loadAggregationManifest(String manifestPath) {
+def loadAggregationManifest(manifestPath: String) -> List<Map> {
     def manifestFile = file(manifestPath)
     if (!manifestFile.exists()) {
         error("Aggregation manifest not found: '${manifestPath}'.")
@@ -198,6 +218,7 @@ def loadAggregationManifest(String manifestPath) {
         entries.each { entry -> JoinFilterArguments.build(entry) }
         return entries
     } catch (IllegalArgumentException e) {
-        error("Invalid aggregation manifest '${manifestPath}': ${e.message}")
+        error("Invalid aggregation manifest '${manifestPath}': ${e.getMessage()}")
+        return []   // not reached: error() stops the run
     }
 }

@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "make_triplet_dge"
 
-    // Contract: tuple val(meta), val(prefixes), path(dges), path(barcode_lists) + path(reduced_gtf)
-    //           -> matrix / barcodes / features: tuple val(meta), path('matrix.mtx.gz' / 'barcodes.tsv.gz' / 'features.tsv.gz').
+    // Contract: record(meta: Map, prefixes: List<String>, dges: List<Path>, barcode_lists: List<Path>) + reduced_gtf: Path
+    //           -> triplet: record(meta: Map, matrix: Path 'matrix.mtx.gz', barcodes: Path 'barcodes.tsv.gz', features: Path 'features.tsv.gz').
     // Fixtures: tests/fixtures/README.md. Uses the local private Java image (nextflow.config). No live test:
     // the merged matrix is checked by the final integration test.
 
@@ -20,25 +20,25 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                    dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
                 """
             }
         }
 
         then {
-            def matrix = gzLines(process.out.matrix[0][1])
+            def matrix = gzLines(process.out.triplet[0].matrix)
             assertAll(
                 { assert process.success },
                 // meta propagated; fixed names
-                { assert process.out.matrix[0][0] == [ id:'analysis1' ] },
-                { assert file(process.out.matrix[0][1]).name == 'matrix.mtx.gz' },
-                { assert file(process.out.barcodes[0][1]).name == 'barcodes.tsv.gz' },
-                { assert file(process.out.features[0][1]).name == 'features.tsv.gz' },
+                { assert process.out.triplet[0].meta == [ id:'analysis1' ] },
+                { assert file(process.out.triplet[0].matrix).name == 'matrix.mtx.gz' },
+                { assert file(process.out.triplet[0].barcodes).name == 'barcodes.tsv.gz' },
+                { assert file(process.out.triplet[0].features).name == 'features.tsv.gz' },
                 // cells: <prefix>_<barcode>, library order, then DGE column order
-                { assert gzLines(process.out.barcodes[0][1]) == ['LIB_A_AAAA', 'LIB_A_GGGG', 'LIB_B_AAAA', 'LIB_B_TTTT'] },
+                { assert gzLines(process.out.triplet[0].barcodes) == ['LIB_A_AAAA', 'LIB_A_GGGG', 'LIB_B_AAAA', 'LIB_B_TTTT'] },
                 // 3 genes x 4 cells, 7 non-zero entries; rows genes (GENEA..C), columns the barcodes above
                 { assert matrix.findAll { !it.startsWith('%') }.take(1) == ['3\t4\t7'] },
                 { assert matrix.findAll { !it.startsWith('%') }.drop(1).collect { it.split('\t') as List } == [
@@ -52,17 +52,17 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                    dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
                 """
             }
         }
 
         then {
-            def barcodes = gzLines(process.out.barcodes[0][1])
-            def matrix = gzLines(process.out.matrix[0][1]).findAll { !it.startsWith('%') }
+            def barcodes = gzLines(process.out.triplet[0].barcodes)
+            def matrix = gzLines(process.out.triplet[0].matrix).findAll { !it.startsWith('%') }
             assertAll(
                 { assert process.success },
                 // CCCC is in lib_a.dge.txt (GENEB = 3) but not in lib_a.cells.tsv: not a cell, and its count is not in the matrix
@@ -79,23 +79,23 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_B' ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                    dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
                 """
             }
         }
 
         then {
-            def matrixHeader = gzLines(process.out.matrix[0][1]).findAll { !it.startsWith('%') }[0].split(/\s+/) as List
-            def features = gzLines(process.out.features[0][1])
+            def matrixHeader = gzLines(process.out.triplet[0].matrix).findAll { !it.startsWith('%') }[0].split(/\s+/) as List
+            def features = gzLines(process.out.triplet[0].features)
             assertAll(
                 { assert process.success },
                 { assert features == ['ENSG01\tGENEA\tGene Expression', 'ENSG02\tGENEB\tGene Expression', 'ENSG03\tGENEC\tGene Expression'] },
                 // matrix header = genes, cells, non-zero entries: consistent with the features and barcodes files
                 { assert matrixHeader[0] as int == features.size() },
-                { assert matrixHeader[1] as int == gzLines(process.out.barcodes[0][1]).size() }
+                { assert matrixHeader[1] as int == gzLines(process.out.triplet[0].barcodes).size() }
             )
         }
     }
@@ -106,9 +106,9 @@ nextflow_process {
             process {
                 """
                 // both libraries use the prefix LIB_A and have the cell AAAA
-                input[0] = [ [ id:'analysis1' ], [ 'LIB_A', 'LIB_A' ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
-                    [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_A' ],
+                    dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
+                    barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
                 """
             }
@@ -117,7 +117,7 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.failed },
-                { assert process.out.matrix.isEmpty() },
+                { assert process.out.triplet.isEmpty() },
                 // the tool reports the duplicate, not a manifest error
                 { assert (process.stdout + process.stderr).join('\n').contains('Output CBCs are not unique') }
             )
