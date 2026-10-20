@@ -93,7 +93,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
 | New checks | | same user_dge in two artifacts; libraries with MapMyCells results of different models (set `mmc_model`); staged files named like `<lib>.mmc.tsv`, the arguments file, the cell metadata or the output |
 
 The software versions are written the same way: `WRITE_VERSIONS` (exec) writes `scrna-aggregation_software_versions.yml` to `pipeline_info/`. The old `topic: versions` channel is gone.
-Which of these files go where is in `conf/modules.config` (`publishDir`); migrating it to the `output` block is a later step.
+Publishing: `SCRNA_AGGREGATION` emits one channel per published file; the entry workflow in `main.nf` lists them in `publish:` and the `output { }` block says where each goes under `--outdir` (`outputDir` in `nextflow.config`, mode `publish_dir_mode`). Nothing else is published. There is no `publishDir` any more.
 
 ## Where to look when something looks wrong
 - What did the YAML become? `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` (plain text: per library the DGE, cell metadata, MapMyCells result, extra files and arguments) and `<lib>.join_and_filter_args.txt` (the exact arguments, one per line; not

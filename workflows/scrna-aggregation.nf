@@ -104,7 +104,7 @@ workflow SCRNA_AGGREGATION {
     // Input: the resolver result, one item.
     // Emits: <analysis>.resolved_libraries.txt, plain text for a person to read: the files and arguments each library is processed with.
     // Published to <outdir>/pipeline_info/ (conf/modules.config); nothing reads it back.
-    WRITE_RESOLVED_SUMMARY(resolved.map { result ->
+    resolved_summary = WRITE_RESOLVED_SUMMARY(resolved.map { result ->
         record(name: "${result.analysisId}.resolved_libraries.txt", text: LibraryResolver.summaryText(result))
     })
 
@@ -136,7 +136,7 @@ workflow SCRNA_AGGREGATION {
         }
 
     // Input: one item, record(meta, tsvs). Emits: MERGE_LIBRARY_METRICS result, one item, record(meta, combined: path('<analysis>.library_metrics.txt')).
-    MERGE_LIBRARY_METRICS(metrics_sorted)
+    merged_metrics = MERGE_LIBRARY_METRICS(metrics_sorted)
 
     // Input: libraries, one item per library. Emits: one item per library, record(id: library id, args_file: path('<library>.join_and_filter_args.txt')):
     // the arguments one per line, written in the work directory (not published). Libraries with no arguments get an empty file.
@@ -163,7 +163,7 @@ workflow SCRNA_AGGREGATION {
 
     // Input: cell_type_column (one value) and the analysis id from the resolver result.
     // Emits: <analysis>.cell_type_column.txt, one file with the column name, published to <outdir>; nothing if there is no column.
-    WRITE_CELL_TYPE_COLUMN(
+    cell_type_column_file = WRITE_CELL_TYPE_COLUMN(
         cell_type_column
             .map { column -> record(column: column) }
             .combine(analysis_id: resolved.map { result -> result.analysisId })
@@ -259,7 +259,7 @@ workflow SCRNA_AGGREGATION {
 
     // Input: metacell_inputs (one item, only with donors).
     // Emits: DONOR_METACELLS result, one item, record(meta, metacells: path('<analysis>.donors.metacells.txt.gz')): expression summed per donor.
-    DONOR_METACELLS(metacell_inputs.map { item ->
+    donor_metacells = DONOR_METACELLS(metacell_inputs.map { item ->
         record(meta: item.meta, matrix: item.matrix, features: item.features, barcodes: item.barcodes, cell_metadata: item.cell_metadata, group_columns: [ 'donor' ])
     })
 
@@ -269,18 +269,36 @@ workflow SCRNA_AGGREGATION {
     cell_type_inputs = metacell_inputs
         .combine(column: cell_type_column)
         .flatMap { item -> item.column ? [ item ] : [] }
-    DONOR_CELL_TYPE_METACELLS(cell_type_inputs.map { item ->
+    donor_cell_type_metacells = DONOR_CELL_TYPE_METACELLS(cell_type_inputs.map { item ->
         record(meta: item.meta, matrix: item.matrix, features: item.features, barcodes: item.barcodes, cell_metadata: item.cell_metadata, group_columns: [ 'donor', item.column ])
     })
 
     // Input: cell_type_inputs (one item only with donors and a cell type column).
     // Emits: DONOR_CELL_TYPE_REPORT result, one item, record(meta, report: path('<analysis>.donor_cell_type.txt')): the cells and median UMIs per donor
     // and cell type.
-    DONOR_CELL_TYPE_REPORT(cell_type_inputs.map { item ->
+    donor_cell_type_report = DONOR_CELL_TYPE_REPORT(cell_type_inputs.map { item ->
         record(meta: item.meta, cell_metadata: item.cell_metadata, cell_type_column: item.column)
     })
 
     // Emits: pipeline_info/scrna-aggregation_software_versions.yml: the pipeline and Nextflow versions. The tool versions are the image tags
     // hard coded in the modules, so no process reports a version.
-    WRITE_VERSIONS(channel.value(record(name: 'scrna-aggregation_software_versions.yml', text: workflowVersionToYAML().trim() + '\n')))
+    versions_file = WRITE_VERSIONS(channel.value(record(name: 'scrna-aggregation_software_versions.yml', text: workflowVersionToYAML().trim() + '\n')))
+
+    // What the pipeline publishes: the entry workflow's `publish:` section and the `output` block in main.nf say where each goes.
+    // Input: the process results above. Emits: one channel of paths per published file (the merged results and pipeline_info files, one item each; the
+    // artifacts directory and the tearsheets, one per library or one directory).
+    emit:
+    artifacts: Value<Path> = located.map { item -> item.artifacts }
+    tearsheets: Channel<Path> = summaries.map { item -> item.tearsheet }
+    library_metrics: Value<Path> = merged_metrics.map { item -> item.combined }
+    cell_metadata: Value<Path> = merged_cell_metadata.map { item -> item.combined }
+    matrix: Value<Path> = triplet.map { item -> item.matrix }
+    barcodes: Value<Path> = triplet.map { item -> item.barcodes }
+    features: Value<Path> = triplet.map { item -> item.features }
+    cell_type_column_file: Channel<Path> = cell_type_column_file
+    donor_cell_type_report: Channel<Path> = donor_cell_type_report.map { item -> item.report }
+    donor_metacells: Channel<Path> = donor_metacells.map { item -> item.metacells }
+    donor_cell_type_metacells: Channel<Path> = donor_cell_type_metacells.map { item -> item.metacells }
+    resolved_summary: Value<Path> = resolved_summary
+    versions_file: Value<Path> = versions_file
 }

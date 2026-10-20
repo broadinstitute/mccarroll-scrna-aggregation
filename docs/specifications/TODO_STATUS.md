@@ -28,8 +28,8 @@ Committed in 6 groups (old resolver modules removed, modules, workflow/config/re
 - `collectFile` is replaced by the `exec` process `WRITE_TEXT_FILE` (4 aliases: resolved summary, args file, cell type column, versions). `topic: versions` is gone; `WRITE_VERSIONS` writes the versions file.
 - `help` decision: `String?` with default `null`; a bare `--help` prints the general help (intercepted in `PIPELINE_INITIALISATION`); `--help <name>` describes one parameter. 2 tests.
 - New tests: 2 `WRITE_TEXT_FILE`, 1 `checkCellTypeColumn` two-list overload, 2 help. Suite: 97 tests, all passed. Details and rules learned: `../development.md` (Static typing).
-- Behaviour changes to remember: the cell type column file and resolved summary are published with `publishDir` (rewritten on re-runs) instead of `collectFile(storeDir:)`; undeclared params fail early.
-- **Still open:** migrate `publishDir` (`conf/modules.config`) to the `output` block (separate block, user-approved for after typing); not done.
+- Behaviour changes to remember: the cell type column file and resolved summary are published by the `output` block (rewritten on re-runs) instead of `collectFile(storeDir:)`; undeclared params fail early.
+- **Publishing migrated to the `output` block (session 8):** `publishDir` is gone from `conf/modules.config`. `SCRNA_AGGREGATION` has typed emits (13 channels of paths: `Value<Path>` or `Channel<Path>`), `MCCARROLL_SCRNA_AGGREGATION` passes them on, the entry workflow lists them under `publish:` and `main.nf` has the `output { }` block; `outputDir = params.outdir` and `workflow.output.mode = params.publish_dir_mode` are in `nextflow.config`. Same published files as before (live test unchanged). To check on Batch: publishing to a `gs://` `--outdir`.
 
 ### C. Workflow-level tests that the live data cannot give (user: "we're going to want tests on filtering that the shell script data can't reproduce anyway")
 All of these are tested today only at Groovy level (`resolver.function.nf.test`, `arguments.function.nf.test`), not through the workflow:
@@ -69,7 +69,7 @@ All of these are tested today only at Groovy level (`resolver.function.nf.test`,
   live library peaked at 625 MB resident memory for `MAKE_TRIPLET_DGE`, so tune with real multi-library sizes on Batch. There is no retry strategy (`errorStrategy`) yet.
 - Check on Batch: the public images pull (`quay.io/broadinstitute/drop-seq_python:current`, `quay.io/broadinstitute/drop-seq_java:current`; `docker.registry = 'quay.io'` only prefixes names
   without a host); `gs://` reads of the artifact directory, cell metadata, MapMyCells csv and the 340 MB reduced GTF in the head job and in tasks; `the `exec` process `WRITE_TEXT_FILE` (it must run in the head job: confirm that no `WRITE_*` task is submitted as a Batch job) and
-  `publishDir` with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
+  the `output` block with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
   `GOOGLE_CLOUD_PROJECT` is empty (untested); `process.resourceLimits` in `conf/test.config` (15 GB) vs the tasks.
 - To test another image tag later (a branch build, with Seqera Platform or a config): `process { withName: 'X' { container = '...' } }`. The tags are hard coded in each module (`current`).
 
@@ -111,7 +111,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with the `WRITE_ARGS_FILE` exec process (work directory only) and BUILD reads it with
   `join_and_filter_tsv --args-file` (python repo branch `jn_modify_aggregation_python_tools`, public main #589). No `ext.args` for BUILD.
 - **Summary for people:** `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`, plain text (reference, reduced GTF, donors, per library the DGE, cell metadata, MapMyCells, extra files and arguments); nothing reads it back.
-- **Publishing (explicit, `conf/modules.config`; nothing is published unless listed; skipped when `--outdir` is null, as in module tests):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
+- **Publishing (explicit: the `output` block and `publish:` in `main.nf`; nothing is published unless listed; module tests run one process and publish nothing):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
   `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.cell_type_column.txt` (written by the `WRITE_CELL_TYPE_COLUMN` exec process, published by `publishDir`),
   `<analysis>.donor_cell_type.txt`, `<analysis>.donors.metacells.txt.gz`, `<analysis>.donor_cell_type.metacells.txt.gz`); per-library records in directories (`artifacts/<uei>.yaml`,
   `tearsheets/<uei>.standard_analysis_tearsheet.txt`); `pipeline_info/`. Per-library library metrics, joined cell metadata, MapMyCells TSV and args files stay in the work directory.
@@ -126,7 +126,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - `combine` flattens list items: wrap a list in a list (`ch.map { [it] }`) or it spreads into separate elements.
 - (Old, `collectFile` is gone: `WRITE_TEXT_FILE` also creates an empty file for empty text.) `splitCsv` takes a `"` at the START of a field as a quote (not in the middle).
 - `join` on maps (`meta`) works by equality, but key by `meta.id` when the maps come from different places. `toSortedList` returns ONE list of tuples (not flattened); the typed workflow uses `collect()` + `toSorted`. More typing gotchas: `../development.md` (Static typing).
-- A `publishDir` path of `null` fails every task: module tests run without `--outdir` (fixed with `enabled: params.outdir != null`). Run the MODULE tests after changing `conf/modules.config`.
+- (Old: a null `publishDir` path failed every task. The `output` block has no such problem.) `path 'x'` in the `output` block nests: a file that is already `tearsheets/<f>` needs `path '.'`. A `Value` emit is typed `Value<Path>`, a queue channel `Channel<Path>`.
 - A process script block cannot read a staged path (use a head-job `map` or pass text); `error()` inside an operator closure stops the run with that message.
 - nf-test gives each run `output/` and `work/` side by side; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
 - macOS: `sed -i ''`, no `zcat` (use `gzip -dc`), Docker cannot see the Claude scratchpad (`/private/tmp/...`), `git rm` refuses files with local modifications.

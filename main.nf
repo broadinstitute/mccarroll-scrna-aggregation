@@ -82,12 +82,28 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     //
     // WORKFLOW: Run pipeline
     //
-    SCRNA_AGGREGATION (
+    results = SCRNA_AGGREGATION (
         manifest,
         entries,
         reference,
         mmc_model
     )
+
+    // The published files, one channel of paths each (see the output block below).
+    emit:
+    artifacts: Value<Path> = results.artifacts
+    tearsheets: Channel<Path> = results.tearsheets
+    library_metrics: Value<Path> = results.library_metrics
+    cell_metadata: Value<Path> = results.cell_metadata
+    matrix: Value<Path> = results.matrix
+    barcodes: Value<Path> = results.barcodes
+    features: Value<Path> = results.features
+    cell_type_column_file: Channel<Path> = results.cell_type_column_file
+    donor_cell_type_report: Channel<Path> = results.donor_cell_type_report
+    donor_metacells: Channel<Path> = results.donor_metacells
+    donor_cell_type_metacells: Channel<Path> = results.donor_cell_type_metacells
+    resolved_summary: Value<Path> = results.resolved_summary
+    versions_file: Value<Path> = results.versions_file
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -118,7 +134,7 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
-    MCCARROLL_SCRNA_AGGREGATION (
+    results = MCCARROLL_SCRNA_AGGREGATION (
         init.manifest,
         init.entries,
         params.reference,
@@ -131,6 +147,48 @@ workflow {
         params.outdir,
         params.monochrome_logs,
     )
+
+    // Each name is a channel of paths from the main workflow; the output block says where it is published, under --outdir.
+    publish:
+    artifacts = results.artifacts
+    tearsheets = results.tearsheets
+    library_metrics = results.library_metrics
+    cell_metadata = results.cell_metadata
+    matrix = results.matrix
+    barcodes = results.barcodes
+    features = results.features
+    cell_type_column_file = results.cell_type_column_file
+    donor_cell_type_report = results.donor_cell_type_report
+    donor_metacells = results.donor_metacells
+    donor_cell_type_metacells = results.donor_cell_type_metacells
+    resolved_summary = results.resolved_summary
+    versions_file = results.versions_file
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    OUTPUT: where the published files go, relative to --outdir (outputDir in nextflow.config)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Nothing else is published: the per-library intermediates stay in the work directories. The merged results are flat in --outdir.
+*/
+
+output {
+    // per-library records: artifacts/<uei>.yaml (the directory LOCATE writes) and tearsheets/<uei>.standard_analysis_tearsheet.txt
+    artifacts                 { path '.' }
+    tearsheets                { path '.' }   // the task output is already tearsheets/<uei>.standard_analysis_tearsheet.txt
+    // merged results, flat
+    library_metrics           { path '.' }
+    cell_metadata             { path '.' }
+    matrix                    { path '.' }
+    barcodes                  { path '.' }
+    features                  { path '.' }
+    cell_type_column_file     { path '.' }
+    donor_cell_type_report    { path '.' }
+    donor_metacells           { path '.' }
+    donor_cell_type_metacells { path '.' }
+    // pipeline_info/
+    resolved_summary          { path 'pipeline_info' }
+    versions_file             { path 'pipeline_info' }
 }
 
 /*
