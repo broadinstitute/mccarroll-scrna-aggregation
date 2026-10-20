@@ -13,7 +13,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
 ## The flow
 
 ```
-  params.manifest (YAML: dgeDefaults + dges[dge, donor, filters, joins])           analysis id, params.reference, params.mmc_model
+  params.manifest (YAML: dgeDefaults + dges[dge, donor, filters, joins])           analysis id, params.mmc_model
         |
         v
  [groovy] PIPELINE_INITIALISATION  (fails here, before any cloud access)

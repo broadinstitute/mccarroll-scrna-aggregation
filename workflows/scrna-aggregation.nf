@@ -77,7 +77,6 @@ workflow SCRNA_AGGREGATION {
     take:
     manifest: Value<Manifest>      // one item: the aggregation YAML
     entries: Value<List<Map>>      // one item: the manifest entries [dge, donor, filters, joins], in manifest order
-    reference: String?             // --reference, the reference name that skips the same-reference check
     mmc_model: String?             // --mmc_model, the MapMyCells model that replaces each library's first model
 
     main:
@@ -85,7 +84,7 @@ workflow SCRNA_AGGREGATION {
     // Input: manifest, one item. Emits: LOCATE_SCRNA_ARTIFACTS result, one item, record(meta, artifacts: a directory with one <uei>.yaml per DGE).
     located = LOCATE_SCRNA_ARTIFACTS(manifest)
 
-    // Input: located (one item) and entries (one item, appended as a field so that nothing is flattened) and the optional --reference and --mmc_model.
+    // Input: located (one item) and entries (one item, appended as a field so that nothing is flattened) and the optional --mmc_model.
     // LibraryResolver.resolve matches each manifest entry with the artifacts of its library and decides what each library is processed from
     // (see lib/LibraryResolver.groovy).
     // Emits: one item, the resolver result Map [analysisId, libraries: [library id -> library Map], reducedGtf, reference, hasDonors]. A resolver error stops the run.
@@ -94,7 +93,7 @@ workflow SCRNA_AGGREGATION {
         .map { item ->
             try {
                 def artifacts = LibraryResolver.readArtifactTexts(item.artifacts).collect { text -> LibraryResolver.loadArtifact(text) }
-                LibraryResolver.resolve(item.entries, artifacts, item.meta.id, [ reference: reference, mmcModel: mmc_model ])
+                LibraryResolver.resolve(item.entries, artifacts, item.meta.id, [ mmcModel: mmc_model ])
             } catch (IllegalArgumentException e) {
                 error("Cannot resolve the libraries of ${item.meta.id}: ${e.getMessage()}")
                 [:]   // not reached: error() stops the run; keeps the closure result a Map

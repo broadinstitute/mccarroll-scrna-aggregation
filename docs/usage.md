@@ -35,7 +35,7 @@ reported with the DGE entry that has the problem. `--analysis_id` prefixes the m
 Files named in `joinFile`, `includeFile` and `excludeFile` use absolute paths (local files or `gs://`) and are staged by Nextflow. How the manifest becomes the
 arguments of each step is diagrammed in [data_flow.md](data_flow.md).
 
-Optional parameters: `--reference` skips the check that all libraries have the same reference (the value is the reference name); `--mmc_model` chooses the
+Optional parameters: `--mmc_model` chooses the
 MapMyCells model instead of each library's first one (the libraries that have MapMyCells results must all use the same model); `--mmc_level` names the MapMyCells taxonomy level of the cell type column (default: the top level; all libraries must end up with the same column). The libraries are resolved
 by the workflow right after the artifacts are located; the run stops with the reason if they cannot be aggregated together. `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`
 is a plain-text record of what each manifest entry resolved to: the DGE, cell metadata, MapMyCells result, extra files and `join_and_filter_tsv` arguments of every library.

@@ -41,7 +41,7 @@ class LibraryResolver {
      * @param entries the manifest entries (AggregationManifest.parse), in manifest order
      * @param artifacts the artifact files (loadArtifact), in any order; those of DGEs not in the manifest are ignored
      * @param analysisId no library id may be the same
-     * @param options [reference: reference name that skips the check that all libraries have the same one, mmcModel:
+     * @param options [mmcModel:
      *   MapMyCells model to use instead of the first model of each library]; either may be null or absent
      * @return [analysisId; hasDonors (all libraries have donors; a mix is an error); libraries: Map of library id to record, in manifest order; reducedGtf; reference].  A record is
      *   [libraryId, position (0-based, in manifest order), hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]: the DGE is the one the manifest names; the arguments
@@ -49,7 +49,6 @@ class LibraryResolver {
      */
     static Map resolve(Iterable<Map> entries, Iterable<Map> artifacts, String analysisId, Map options = [:]) {
         String mmcModel = options.mmcModel
-        String referenceOverride = options.reference
 
         Map<String, Map> datasetByDge = [:]
         artifacts.each { Map artifact ->
@@ -108,14 +107,10 @@ class LibraryResolver {
             throw new IllegalArgumentException("A library ID cannot be the same as the analysis identifier: ${analysisId}")
         }
 
-        String reference = referenceOverride
-        if (reference == null) {
-            if (idsByReference.size() > 1) {
-                throw new IllegalArgumentException(
-                    "All DGEs must have the same reference.  Found ${idsByReference}.  Set the reference parameter to skip this check.")
-            }
-            reference = idsByReference.keySet().first()
+        if (idsByReference.size() > 1) {
+            throw new IllegalArgumentException("All DGEs must have the same reference.  Found ${idsByReference}.")
         }
+        String reference = idsByReference.keySet().first()
 
         List<String> noGtf = libraries.values().findAll { it.reducedGtf == NA }*.libraryId
         if (noGtf) {

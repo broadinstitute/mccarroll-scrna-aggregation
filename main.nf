@@ -34,7 +34,6 @@ params {
     // Input options
     manifest: String?               // YAML aggregation manifest (local path or gs://)
     analysis_id: String?            // label of this aggregation: prefix of the merged output files
-    reference: String?              // reference name that skips the check that all libraries have the same one
     mmc_model: String?              // MapMyCells model to use instead of the first model of each library
     mmc_level: String?              // MapMyCells taxonomy level for the cell type column
     outdir: String?                 // directory where the results are published
@@ -74,7 +73,6 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     take:
     manifest: Value<Manifest>   // one item: record(meta: [id: analysis id], manifest: path)
     entries: Value<List<Map>>   // one item: the list of manifest entries, in manifest order
-    reference: String?          // params.reference, the reference name that skips the same-reference check
     mmc_model: String?          // params.mmc_model, the MapMyCells model that replaces each library's first model
 
     main:
@@ -85,7 +83,6 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     results = SCRNA_AGGREGATION (
         manifest,
         entries,
-        reference,
         mmc_model
     )
 
@@ -137,7 +134,6 @@ workflow {
     results = MCCARROLL_SCRNA_AGGREGATION (
         init.manifest,
         init.entries,
-        params.reference,
         params.mmc_model
     )
     //

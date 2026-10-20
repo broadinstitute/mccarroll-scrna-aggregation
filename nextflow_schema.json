@@ -33,11 +33,6 @@
                     "help_text": "It must differ from the library ids (the UEIs of the DGEs).",
                     "fa_icon": "fas fa-tag"
                 },
-                "reference": {
-                    "type": "string",
-                    "description": "Reference name that skips the check that all libraries have the same reference.",
-                    "fa_icon": "fas fa-dna"
-                },
                 "mmc_model": {
                     "type": "string",
                     "description": "MapMyCells model to use instead of the first model of each library.",

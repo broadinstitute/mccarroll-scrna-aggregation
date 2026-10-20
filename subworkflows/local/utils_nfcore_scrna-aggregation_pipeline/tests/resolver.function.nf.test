@@ -12,7 +12,7 @@ nextflow_function {
     //   loadArtifact(String yamlText): the artifact file of one library (written by LOCATE_SCRNA_ARTIFACTS) as a map, checked to have one dataset
     //     with a uei and a user_dge.
     //   resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options): entries from AggregationManifest.parse, artifacts from
-    //     loadArtifact, options [reference: String|null, mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
+    //     loadArtifact, options [mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
     //     reducedGtf, reference, analysisId, hasDonors]; a record is [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
     //     The DGE of a library is the one the manifest names (the artifact's user_dge), whatever its type. A library has donors if its manifest entry
     //     names a donor or its artifacts have a village (village_properties); hasDonors is true if all have, and a mix is an error.
@@ -231,7 +231,6 @@ nextflow_function {
             def otherGtf = artifact('LIB_B', [reduced_gtf: '/ref/OTHER.reduced.gtf'])
             def noReference = { String uei -> artifact(uei, [reference: 'NA', alignment_dir: '/data/some/REF_DIR/']) }
             def mixedReferences = failure { resolve(entriesFor([a, otherReference]), [a, otherReference]) }
-            def overridden = resolve(entriesFor([a, otherReference]), [a, otherReference], 'analysis1', [reference: 'GIVEN'])
             // with no reference in the artifacts it is the name of the alignment directory
             def fallback = resolve(entriesFor([noReference('LIB_A'), noReference('LIB_B')]), [noReference('LIB_A'), noReference('LIB_B')])
             def mixedGtf = failure { resolve(entriesFor([a, otherGtf]), [a, otherGtf]) }
@@ -242,7 +241,6 @@ nextflow_function {
             assertAll(
                 { assert function.success },
                 { assert mixedReferences != null && mixedReferences.toLowerCase().contains('reference') && mixedReferences.contains('OTHER') },
-                { assert overridden.reference == 'GIVEN' && overridden.libraries.size() == 2 },
                 { assert fallback.reference == 'REF_DIR' },
                 { assert mixedGtf != null && mixedGtf.toLowerCase().contains('gtf') && mixedGtf.contains('OTHER.reduced.gtf') },
                 { assert missingGtf != null && missingGtf.toLowerCase().contains('gtf') && missingGtf.contains('LIB_B') },
