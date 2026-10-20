@@ -1,6 +1,6 @@
 # TODO / status
 
-Last updated: 2026-10-20 (session 8: strict syntax + static typing done, see B; docs updated). Branch `jn_google_cloud_analysis`. The typing work is NOT committed yet (many modified files, plus new `conf/params.config` and `modules/local/write_text_file/`): the full suite passed, so commit when the user says so. Sessions 4 to 7 are committed. Commit only when the user asks.
+Last updated: 2026-10-20 (session 8: strict syntax + static typing done, see B; docs updated). Branch `jn_google_cloud_analysis`. The typing work is committed (`b56efab`) and pushed; no pull request opened. Sessions 4 to 8 are committed. Commit only when the user asks.
 
 **NEXT (handoff): section C, workflow-level tests on small synthetic data sets** that check how the manifest's filters, joins, donor, etc. reach `BUILD_LIBRARY_CELL_METADATA` and the merged outputs. Start with the clarification questions and the severity-ranked candidate list; stop for the user's selection.
 
@@ -22,7 +22,7 @@ Last updated: 2026-10-20 (session 8: strict syntax + static typing done, see B; 
 ### A. Commit the work (done in session 7)
 Committed in 6 groups (old resolver modules removed, modules, workflow/config/resolver, tests, Batch checks, docs). Not pushed. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories before the next commit.
 
-### B. Nextflow language: strict syntax and static typing (DONE in session 8, not committed)
+### B. Nextflow language: strict syntax and static typing (DONE in session 8, committed `b56efab`)
 - Every script has `nextflow.enable.types = true` (Nextflow 26.10.0): `main.nf` (typed `params` block, types only; defaults in `conf/params.config`, included by `nextflow.config`), the init subworkflow (`Manifest` record),
   `workflows/scrna-aggregation.nf` (`Library` record, record joins by `id`, typed helper `toLibraries`) and the 8 modules (record inputs, named record outputs). Module tests use `record(...)` inputs.
 - `collectFile` is replaced by the `exec` process `WRITE_TEXT_FILE` (4 aliases: resolved summary, args file, cell type column, versions). `topic: versions` is gone; `WRITE_VERSIONS` writes the versions file.
@@ -107,12 +107,12 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - **Donors are known upfront, not from file headers:** a library has donors if its manifest entry has a `donor` or its artifacts have a village (`village_properties != NA`); `hasDonors` is true for the run
   if all do. Donor steps are gated on that, the cell type steps on the presence of a cell type column; a skipped step logs a warning.
 - **Order:** libraries are merged in MANIFEST order (`position` in the record and in `meta_lib`); the merged metrics, the merged cell metadata and the triplet DGE are all made from ONE sorted list.
-- **Per library item:** `tuple val(meta_lib), val(record)`; `meta_lib = [id, analysis_id, mmc_model, position]`; `record = [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations ('NA' for none), args: List, files: List]`.
-- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with `collectFile` (work directory only) and BUILD reads it with
+- **Per library item (typed since session 8):** the `Library` record in `workflows/scrna-aggregation.nf`: `id`, `meta` (`[id, analysis_id, mmc_model, position]`), `dge`, `cell_metadata`, `mmc_annotations` ('NA' for none), `args: List<String>`, `files: List<String>`. `LibraryResolver` still returns Groovy maps (`libraryId`, `position`, `hasDonor`, ...); `toLibraries` converts them.
+- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with the `WRITE_ARGS_FILE` exec process (work directory only) and BUILD reads it with
   `join_and_filter_tsv --args-file` (python repo branch `jn_modify_aggregation_python_tools`, public main #589). No `ext.args` for BUILD.
 - **Summary for people:** `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`, plain text (reference, reduced GTF, donors, per library the DGE, cell metadata, MapMyCells, extra files and arguments); nothing reads it back.
 - **Publishing (explicit, `conf/modules.config`; nothing is published unless listed; skipped when `--outdir` is null, as in module tests):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
-  `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.cell_type_column.txt` (written by the workflow with `collectFile(storeDir: params.outdir)`),
+  `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.cell_type_column.txt` (written by the `WRITE_CELL_TYPE_COLUMN` exec process, published by `publishDir`),
   `<analysis>.donor_cell_type.txt`, `<analysis>.donors.metacells.txt.gz`, `<analysis>.donor_cell_type.metacells.txt.gz`); per-library records in directories (`artifacts/<uei>.yaml`,
   `tearsheets/<uei>.standard_analysis_tearsheet.txt`); `pipeline_info/`. Per-library library metrics, joined cell metadata, MapMyCells TSV and args files stay in the work directory.
 - **Containers:** hard coded in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (both public; both checked to contain every tool and option the
@@ -124,8 +124,8 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 
 ## 4. Gotchas learned (move to `../development.md` if they keep mattering)
 - `combine` flattens list items: wrap a list in a list (`ch.map { [it] }`) or it spreads into separate elements.
-- `collectFile` with empty text still creates an (empty) file; `splitCsv` takes a `"` at the START of a field as a quote (not in the middle).
-- `join` on maps (`meta`) works by equality, but key by `meta.id` when the maps come from different places. `toSortedList` returns ONE list of tuples (not flattened).
+- (Old, `collectFile` is gone: `WRITE_TEXT_FILE` also creates an empty file for empty text.) `splitCsv` takes a `"` at the START of a field as a quote (not in the middle).
+- `join` on maps (`meta`) works by equality, but key by `meta.id` when the maps come from different places. `toSortedList` returns ONE list of tuples (not flattened); the typed workflow uses `collect()` + `toSorted`. More typing gotchas: `../development.md` (Static typing).
 - A `publishDir` path of `null` fails every task: module tests run without `--outdir` (fixed with `enabled: params.outdir != null`). Run the MODULE tests after changing `conf/modules.config`.
 - A process script block cannot read a staged path (use a head-job `map` or pass text); `error()` inside an operator closure stops the run with that message.
 - nf-test gives each run `output/` and `work/` side by side; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
