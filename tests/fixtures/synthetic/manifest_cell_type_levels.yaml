@@ -1,0 +1,6 @@
+# two libraries with MapMyCells results and donors; the top level of the hierarchy is class in LIB_MMC_1 and supercluster in LIB_MMC_SUPER
+dges:
+  - dge: @ROOT@/LIB_MMC_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_1.selected.digital_expression.txt.gz
+    donor: N1
+  - dge: @ROOT@/LIB_MMC_SUPER/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_SUPER.selected.digital_expression.txt.gz
+    donor: N3

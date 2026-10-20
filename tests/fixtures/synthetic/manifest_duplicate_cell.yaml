@@ -1,0 +1,3 @@
+# one library whose cell metadata lists the barcode AAAA twice
+dges:
+  - dge: @ROOT@/LIB_DUP/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_DUP.selected.digital_expression.txt.gz

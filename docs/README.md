@@ -9,6 +9,6 @@ The mccarroll/scrna-aggregation documentation is split into the following pages:
 - [Running locally and on Google Cloud](credentials.md)
   - The credentials, environment variables and parameters needed to read `gs://` data, locally and in the cloud.
 - [Testing](testing.md)
-  - How to run the unit and live tests, the baseline, fixtures and the test catalog.
+  - How to run the unit, synthetic-pipeline and live tests, the baseline, and what each test checks.
 - [Development](development.md)
   - Coding conventions and known pitfalls.

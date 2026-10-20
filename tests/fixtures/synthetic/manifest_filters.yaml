@@ -1,0 +1,15 @@
+# donors, MapMyCells results, joins and filters (min, max, include, exclude, includeFile, excludeFile)
+dgeDefaults:
+  joins:
+    - {joinFile: @ROOT@/files/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
+dges:
+  - dge: @ROOT@/LIB_MMC_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_1.selected.digital_expression.txt.gz
+    donor: N1
+    filters:
+      pct_mt: {min: 0.015, max: 0.4}
+      MODEL1_class_name: {include: [Glut, Vip]}
+  - dge: @ROOT@/LIB_MMC_2/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_2.selected.digital_expression.txt.gz
+    donor: N2
+    filters:
+      cell_barcode: {includeFile: @ROOT@/files/keep_mmc_2.txt, excludeFile: @ROOT@/files/drop_mmc_2.txt}
+      MODEL1_class_name: {exclude: [GABA]}

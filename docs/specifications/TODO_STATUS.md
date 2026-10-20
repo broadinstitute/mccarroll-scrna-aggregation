@@ -1,12 +1,12 @@
 # TODO / status
 
-Last updated: 2026-10-20 (session 8: strict syntax + static typing done, see B; docs updated). Branch `jn_google_cloud_analysis`. The typing work is committed (`b56efab`) and pushed; no pull request opened. Sessions 4 to 8 are committed. Commit only when the user asks.
+Last updated: 2026-10-20 (session 9: synthetic workflow tests, section C complete, `--reference` removed). Branch `jn_google_cloud_analysis`. Sessions 4 to 9 are committed; nothing is pushed and no pull request is open. Commit only when the user asks.
 
-**NEXT (handoff): section C, workflow-level tests on small synthetic data sets** that check how the manifest's filters, joins, donor, etc. reach `BUILD_LIBRARY_CELL_METADATA` and the merged outputs. Start with the clarification questions and the severity-ranked candidate list; stop for the user's selection.
+**NEXT (handoff):** section D (the full run on Google Batch). Start with the clarification questions and the severity-ranked candidate list; stop for the user's selection.
 
 ## 1. Where we are
 
-- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 97 tests in about 10 minutes with no failures at the end of session 8 (after the typing)
+- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 100 tests in about 11.5 minutes with no failures in session 9 (97 before, plus 3 synthetic); 4 more synthetic tests were added afterwards and `--reference` was removed (104 tests in all; the whole suite passed, 782 s)
   (needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`).
   `nextflow lint .` is clean (48 files, no errors or warnings).
 - **What the pipeline does** (`main.nf` -> `workflows/scrna-aggregation.nf`; data-flow diagram in `../data_flow.md`):
@@ -31,20 +31,19 @@ Committed in 6 groups (old resolver modules removed, modules, workflow/config/re
 - Behaviour changes to remember: the cell type column file and resolved summary are published by the `output` block (rewritten on re-runs) instead of `collectFile(storeDir:)`; undeclared params fail early.
 - **Publishing migrated to the `output` block (session 8):** `publishDir` is gone from `conf/modules.config`. `SCRNA_AGGREGATION` has typed emits (13 channels of paths: `Value<Path>` or `Channel<Path>`), `MCCARROLL_SCRNA_AGGREGATION` passes them on, the entry workflow lists them under `publish:` and `main.nf` has the `output { }` block; `outputDir = params.outdir` and `workflow.output.mode = params.publish_dir_mode` are in `nextflow.config`. Same published files as before (live test unchanged). To check on Batch: publishing to a `gs://` `--outdir`.
 
-### C. Workflow-level tests that the live data cannot give (user: "we're going to want tests on filtering that the shell script data can't reproduce anyway")
-All of these are tested today only at Groovy level (`resolver.function.nf.test`, `arguments.function.nf.test`), not through the workflow:
-- **Several libraries** (the biggest gap): the i-th prefix, DGE and barcode list belong to the same library; the metadata row order equals the barcode order; the merge order is manifest
-  order (`meta_lib.position`) whatever order the tasks finish in; `MERGE_CELL_METADATA` fails on a duplicate `(PREFIX, cell_barcode)`.
-- **No donors**, **mixed donors** (resolver error, covered in Groovy only), **no MapMyCells results** (report and donor by cell type metacells skipped with a warning), **disagreeing cell
-  type columns**, **non-empty join / filter arguments** (donor, `includeFile`, `excludeFile`, `min`, `max`, `joins`) through BUILD, `--mmc_model`, `--mmc_level`, `--reference` overrides.
-- **How:** a stubbed workflow test is NOT possible as things are (LOCATE's stub makes an empty `artifacts/` directory, so the resolver fails). Options: (a) a small synthetic multi-library
-  dataset on LOCAL paths (LOCATE accepts local paths; its module tests already use local fixtures), real processes on tiny data (user-approved direction, "B for now"); (b) a second real
-  library on `gs://` for a two-library live manifest (also covers edges 3 to 6). `tests/live_data/manifest_no_donors.yaml` (selected-cells DGE, no donors) has never been run; no
-  prototype baseline exists for it.
-- **Planned next (user, end of session 8): workflow-level tests with small SYNTHETIC data sets** (option (a): local paths, real processes on tiny data) that test the argument passing from the original manifest:
-  `donor`, `filters` (`min`, `max`, `include`, `exclude`, `includeFile`, `excludeFile`), `joins` and `dgeDefaults` through `LibraryResolver` -> `WRITE_ARGS_FILE` -> `BUILD_LIBRARY_CELL_METADATA` -> merged cell metadata, with
-  two or more libraries, no-donor and no-MapMyCells variants (the no-MMC path, `mmc_tsv = null`, has never run through the workflow). The workflow is typed now, so a test pipeline run needs the fake library tree of LOCATE's fixtures
-  (`modules/local/locate_scrna_artifacts/tests/fixtures/README.md`), a reduced GTF fixture and the profile/params of `tests/nextflow.config`.
+### C. Workflow-level tests that the live data cannot give (started in session 9)
+**Done (session 9):** `tests/pipeline.synthetic.nf.test`, 7 tests on local synthetic libraries (`tests/fixtures/synthetic/`, real processes in Docker, no credentials, network or baseline; documented in `../testing.md`):
+1. (main test) a manifest with two MapMyCells libraries and donors: `min`, `max`, `include`, `exclude`, `includeFile`, `excludeFile`, `donor` and a join (from `dgeDefaults`) reach `BUILD_LIBRARY_CELL_METADATA` and the merged cell metadata, the matrix, the donor metacells (summed per donor and per donor and cell type) and the donor cell type report, with expected values worked out by hand.
+2. (guard) two libraries with no donors and no MapMyCells results (the no-MapMyCells path, `mmc_tsv = null`, ran through the workflow for the first time): cells, counts and prefix stay with their own library, in manifest order (the reverse of alphabetical), the skip warnings are logged and no donor files are published.
+3. (guard) a duplicate (`PREFIX`, `cell_barcode`) fails `MERGE_CELL_METADATA`.
+4. (guard) libraries with different cell type columns (`LIB_MMC_SUPER` has the hierarchy supercluster > class) stop the run with the resolver's message.
+5. `--mmc_level class` on the same libraries: cell type column, merged metadata, donor cell type report and metacells use `MODEL1_class_name`.
+6. (guard) mixed donors (one library with a donor, one without) stop at the resolver before any per-library process.
+7. `--mmc_model MODEL2` (a second MapMyCells model in `LIB_MMC_1` and `LIB_MMC_2`) selects that model in every library.
+
+**Decided not to do (user, session 9):** merge order independent of task finish order (the order is the manifest order by construction), `dgeDefaults` beyond one join, a village library through the workflow, running `manifest_no_donors.yaml`, a second real library on `gs://`.
+**Parameter `--reference` removed (user decision, session 9):** libraries with different references always fail in the resolver ("All DGEs must have the same reference"); the override did not change any output. Removed from `main.nf`, `conf/params.config`, `nextflow_schema.json`, the workflow, `LibraryResolver` and the docs (`docs/specifications/scrna-aggregation_prototype.sh` and `SPEC_SUMMARY.md` still describe the prototype's own `--reference`).
+**Section C is complete.**
 - Process reminder: ask clarification questions, state the data contract, list severity-ranked candidate tests, STOP for the user's selection (see Ground rules).
 
 ### D. Google Cloud / Batch (session 7 tested the basics; the full pipeline has NOT yet run on Batch)
@@ -81,7 +80,7 @@ All of these are tested today only at Groovy level (`resolver.function.nf.test`,
 ### F. Unselected candidate tests (add when touching the unit)
 LOCATE / SUMMARIZE: malformed YAML, newest-trace selection, stub. MERGE_LIBRARY_METADATA: ext.prefix, same barcode with different PREFIX, stub. FORMAT: meta / name, no prefix, ext.prefix, stub.
 BUILD: duplicate join key, meta / name, ext.prefix, stub. MAKE_TRIPLET_DGE: single library, meta / names, stub. DONOR_CELL_TYPE_REPORT: numeric-looking donor ids kept as text, `ext.args --umi-column`, stub.
-Workflow: the `--mmc_model` / `--reference` / `--mmc_level` overrides reaching the process; entry args and files reaching BUILD; stub wiring run. Module names: the user was offered a review of the
+Workflow: entry args and files reaching BUILD; stub wiring run. Module names: the user was offered a review of the
 remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 
 ### G. Housekeeping
@@ -102,7 +101,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - **Library resolution (`lib/LibraryResolver.groovy`, head job, no process):** the library id is the artifact `uei`; an entry is matched to its artifact by `entry.dge == artifact.user_dge`. The library's
   DGE is the one the MANIFEST names, of any type (NOT donors-else-selected-cells as in the Python `resolve_aggregation_manifest`); the DGE may hold more barcodes than the cell metadata, the metadata selects
   the cells later. Cell metadata is the one the finder chose (the village's if there is a village). A resolver error stops the run (`Cannot resolve the libraries of <analysis>: <reason>`). Checks: unique ids
-  that differ from the analysis id, one reference (or `--reference`), one reduced GTF, MapMyCells results of one model (or `--mmc_model`), same cell type column in every library, all libraries have
+  that differ from the analysis id, one reference, one reduced GTF, MapMyCells results of one model (or `--mmc_model`), same cell type column in every library, all libraries have
   donors or none. The old `RESOLVE_LIBRARIES` process (TSV round trip) and `RESOLVE_AGGREGATION_MANIFEST` module were deleted.
 - **Donors are known upfront, not from file headers:** a library has donors if its manifest entry has a `donor` or its artifacts have a village (`village_properties != NA`); `hasDonors` is true for the run
   if all do. Donor steps are gated on that, the cell type steps on the presence of a cell type column; a skipped step logs a warning.
@@ -118,8 +117,8 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - **Containers:** hard coded in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (both public; both checked to contain every tool and option the
   modules use). No image parameters. nf-test runs cap memory at 4 GB in `tests/nextflow.config`.
 - **Reduced GTF:** staged from `gs://` (340 MB) in the live test; no override parameter was added.
-- **Parameters:** `--manifest`, `--analysis_id` (letters, digits, `.`, `_`, `-`), `--outdir`, `--reference`, `--mmc_model`, `--mmc_level`, `--gcp_credentials_file`.
-- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
+- **Parameters:** `--manifest`, `--analysis_id` (letters, digits, `.`, `_`, `-`), `--outdir`, `--mmc_model`, `--mmc_level`, `--gcp_credentials_file`.
+- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), `tests/pipeline.synthetic.nf.test` (3 workflow tests on synthetic local libraries), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
   exact top-level listing of `--outdir`, per-library intermediates in the work directory, every task in a public `current` image; and a resolver error stopping the run) and `tests/pipeline.validation.nf.test`.
 
 ## 4. Gotchas learned (move to `../development.md` if they keep mattering)
@@ -158,7 +157,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 ## 7. Run the tests
 ```bash
 export GOOGLE_PROJECT_ID=bican-um1-mccarroll
-tests/run_all_tests.sh                                   # everything, 97 tests, about 10 minutes (needs the baseline, see ../testing.md)
+tests/run_all_tests.sh                                   # everything, 104 tests, about 12 minutes (needs the baseline, see ../testing.md)
 nf-test test modules/local/<module>/tests/main.nf.test   # one file; --tag live runs all the live tests
 nf-test test tests/pipeline.live.nf.test                 # the whole pipeline once vs the baseline, about a minute
 ```

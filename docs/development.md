@@ -43,8 +43,8 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
 - **`sed` on macOS** has no `\b` word boundary; use a plain case-sensitive replacement or `perl -pi -e`.
 - **`${...}` inside a nf-test `process { """...""" }` string** is interpolated by nf-test in the test context. Resolve
   variables before the `process` block and interpolate only simple values.
-- **nf-test `--filter`** selects test types (process, workflow, pipeline, function), not test names. See "Running one file or
-  one test" in [testing.md](testing.md).
+- **nf-test `--filter`** selects test types (process, workflow, pipeline, function), not test names. See "How to run the
+  tests" in [testing.md](testing.md).
 - **nf-test needs `$HOME/.nf-test`** (its jar). If you point `HOME` elsewhere to simulate a missing credentials file, symlink it.
 - **Shell variables do not persist** between separate commands in the agent tooling, and commands over 120 s must run in the
   background: pass `GOOGLE_PROJECT_ID=... command` inline.
