@@ -1,6 +1,6 @@
 // Live check: does LOCATE_SCRNA_ARTIFACTS read the real gs:// artifacts on Google Batch, with the VM's default service
 // account (no service account configured, no credentials mounted)? Not an nf-test, because nf-test always passes a local
-// -work-dir and Batch needs a gs:// one. Run from the repository root:
+// -work-dir and Google Batch needs a gs:// one. Run from the repository root:
 //   export GOOGLE_PROJECT_ID=bican-um1-mccarroll GOOGLE_LOCATION=us-central1
 //   nextflow run modules/local/locate_scrna_artifacts/tests/gcs_batch_check.nf \
 //     -c modules/local/locate_scrna_artifacts/tests/gcs_batch.config \
