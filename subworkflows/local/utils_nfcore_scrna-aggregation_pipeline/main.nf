@@ -158,15 +158,17 @@ workflow PIPELINE_COMPLETION {
 // If the host file is missing, Docker silently creates a directory at the mount source and tasks
 // then fail later with an obscure credentials error.
 //   profile:         comma-separated Nextflow profile string, e.g. 'docker'
-//   credentialsFile: host path of the credentials JSON (params.gcp_credentials_file): gcloud Application Default
+//   credentialsFileParam: host path of the credentials JSON (params.gcp_credentials_file, null for the default): gcloud Application Default
 //                    Credentials (type authorized_user) or a service account key (type service_account)
 //   projectId:       value of the GOOGLE_PROJECT_ID environment variable (null or empty if unset). The Google
 //                    storage client needs a project; an authorized_user file has none, a service_account key does.
 //
-def checkLocalGcpCredentials(profile: String, credentialsFile: String, projectId: String?) {
+def checkLocalGcpCredentials(profile: String, credentialsFileParam: String?, projectId: String?) {
     if (!profile.tokenize(',').contains('docker')) {
         return
     }
+    // --gcp_credentials_file, else your gcloud Application Default Credentials (the same default as the docker profile mount)
+    def credentialsFile = credentialsFileParam ?: "${System.getProperty('user.home')}/.config/gcloud/application_default_credentials.json"
     def credentials = file(credentialsFile)
     if (!credentials.isFile()) {
         error("GCP credentials not found as a file at '${credentialsFile}'. " +

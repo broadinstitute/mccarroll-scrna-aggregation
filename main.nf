@@ -37,7 +37,7 @@ params {
     mmc_model: String?              // MapMyCells model to use instead of the first model of each library
     mmc_level: String?              // MapMyCells taxonomy level for the cell type column
     outdir: String?                 // directory where the results are published
-    gcp_credentials_file: String    // GCP credentials JSON mounted into task containers (docker profile)
+    gcp_credentials_file: String?   // GCP credentials JSON mounted into task containers (docker profile)
 
     // Boilerplate options
     publish_dir_mode: String
@@ -55,8 +55,6 @@ params {
     config_profile_description: String?
     config_profile_contact: String?
     config_profile_url: String?
-    custom_config_version: String
-    custom_config_base: String
 }
 
 /*
