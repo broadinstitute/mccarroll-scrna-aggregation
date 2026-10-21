@@ -28,7 +28,7 @@ Coding conventions and known pitfalls. How to run the tests, the live tests, the
 - `help` is a `String?` with default `null`: `--help <name>` describes a parameter; a bare `--help` is intercepted in `PIPELINE_INITIALISATION` and prints the general help.
 - Typed workflow rules met here: no `.out` (use the call's return value), no `set`/`tap`/`Channel.`, explicit closure parameters, no `filter` on a `Value` (use `flatMap { x -> cond ? [x] : [] }`),
   `collect()` + `toSorted` instead of `toSortedList`, `join(by: 'id')` on records, `.toList()` for `Iterable` vs `List`, `e.getMessage()`, `exit(0, "")`, `error()` in a closure needs a value after it.
-  `collectFile` has no typed form: `WRITE_TEXT_FILE` is an `exec` process (runs in the head job; to be confirmed on Batch).
+  `collectFile` has no typed form: `WRITE_TEXT_FILE` is an `exec` process (runs in the head job; to be confirmed on Google Batch).
 - Lists in a script string render as `[a, b]`: use `.join(' ')`.
 - nf-test: inputs of typed processes are `record(...)` and outputs are read as `process.out.<name>[0].<field>`; INFO log output (the help) is in `${metaDir}/nextflow.log`, not in `workflow.stdout`.
 

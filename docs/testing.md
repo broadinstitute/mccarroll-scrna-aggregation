@@ -9,6 +9,7 @@ Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the re
 - [Unit tests](#unit-tests)
 - [Pipeline tests on synthetic libraries](#pipeline-tests-on-synthetic-libraries)
 - [Live tests](#live-tests-real-data-compared-with-the-baseline)
+- [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)
 
 ## Test conventions
 
@@ -26,7 +27,8 @@ Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the re
 | Pipeline tests on synthetic libraries (7) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
 | Pipeline input validation and `--help` (6) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
 | Live tests (11) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
-| Everything: 104 tests | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
+| Whole pipeline on Google Batch (a script, not an nf-test; costs a little money) | `nextflow`, `gsutil`, Application Default Credentials, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION` and the baseline | `tests/batch_full_run/run.sh` (see [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)) |
+| Everything: 104 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
 
 To run less: add the ID nf-test prints in brackets to select one test (`...main.nf.test@14bbfafa`; the ID changes if the test is renamed), `--dry-run` to list what would run, or select by tag (`live`, `gcs`, `pipeline_synthetic`). A plain `nf-test test` also runs the live tests, which fail without the baseline, so use the script or select by path. `nf-test.config` sets the default profile to `docker,test`. Test output goes to `.nf-test/` (git-ignored).
 
@@ -85,7 +87,6 @@ Each filter removes a different cell, so a filter that is not applied changes th
 - The matrix has the same four cells (`barcodes.tsv.gz`, in that order) and 8 nonzero entries: a filtered-out cell must not leak into the counts. GENEA is 1, 3, 7, 9 and GENEC is 4, 6, 3, 5 for the four cells; GENEB is zero in all of them.
 - The donor metacells hold the expression summed per donor: `N1` is `LIB_MMC_1` `AAAA` + `ACAC` (GENEA 1 + 3 = 4, GENEC 4 + 6 = 10) and `N2` is `LIB_MMC_2` (GENEA 7 + 9 = 16, GENEC 3 + 5 = 8). The donor by cell type metacells have the same sums under `N1:Glut` and `N2:Glut`.
 - The donor cell type report has two cells per donor, all `Glut`, with median `num_retained_transcripts` 300 (median of 100 and 500) for `N1` and 30 (median of 10 and 50) for `N2`.
-- `SYN.cell_type_column.txt` contains `MODEL1_class_name`.
 
 ### Test 2 (guard): merge two libraries in manifest order, keeping each cell's metadata and counts with its own library
 
@@ -126,7 +127,7 @@ These run the whole pipeline through the resolver and the cell type step, on `ma
 **Test 5: `--mmc_level class` sets the cell type column, report and metacells.**
 - *Risk:* a level given on the command line might not reach `FORMAT_MAPMYCELLS_ANNOTATIONS`, or might reach only some libraries.
 - *Setup:* the same two libraries as test 4, run with `--mmc_level class`. Both now have `MODEL1_class_name`.
-- *Checks:* `SYN.cell_type_column.txt` is `MODEL1_class_name`. The merged metadata has 7 cells (5 from `LIB_MMC_1`, 2 from `LIB_MMC_SUPER`), each with the class from its own library's result. The report has one row per donor and class (for example `N1` `Glut`: 3 cells, fraction 0.6, median 300; `N3` `GABA`: 1 cell, fraction 0.5, median 2000), and the metacells have one column per donor and class (`N1:GABA`, `N1:Glut`, `N1:Vip`, `N3:GABA`, `N3:Glut`).
+- *Checks:* The merged metadata has 7 cells (5 from `LIB_MMC_1`, 2 from `LIB_MMC_SUPER`), each with the class from its own library's result. The report has one row per donor and class (for example `N1` `Glut`: 3 cells, fraction 0.6, median 300; `N3` `GABA`: 1 cell, fraction 0.5, median 2000), and the metacells have one column per donor and class (`N1:GABA`, `N1:Glut`, `N1:Vip`, `N3:GABA`, `N3:Glut`).
 
 **Test 6 (guard): stop at the resolver when only some libraries have donors.**
 - *Risk:* a matrix with donors for only some libraries would give donor metacells that silently leave out cells.
@@ -136,7 +137,7 @@ These run the whole pipeline through the resolver and the cell type step, on `ma
 **Test 7: `--mmc_model MODEL2` selects that model in every library.**
 - *Risk:* by default each library uses its first MapMyCells model. If the override did not reach every library, the cell type columns would mix models.
 - *Setup* (`manifest_mmc_model.yaml`): `LIB_MMC_1` and `LIB_MMC_2` each have two models: `MODEL1` (the first, classes Glut, GABA, Vip) and `MODEL2` (classes Neuron, Glia). The other tests use the default, so they exercise `MODEL1`.
-- *Checks:* `SYN.cell_type_column.txt` is `MODEL2_class_name`; the merged metadata has no `MODEL1` column and each cell carries its own library's `MODEL2` class; the report has the exact counts, fractions and medians per donor and class (for example `N2` `Glia`: 2 cells, fraction 0.4, median 35).
+- *Checks:* the merged metadata has no `MODEL1` column and each cell carries its own library's `MODEL2` class; the report has the exact counts, fractions and medians per donor and class (for example `N2` `Glia`: 2 cells, fraction 0.4, median 35).
 
 **Not covered:** a different finishing order of the tasks (the merge order is the manifest order by construction, so it cannot depend on it) and default filters merged with entry filters through the workflow (Groovy tests only). There is no `--reference` parameter: libraries with different references always fail in the resolver.
 
@@ -185,7 +186,7 @@ One file per module, each running every library in the baseline:
 | `merge_library_metadata/tests/live.nf.test` (2 tests) | baseline | `MERGE_LIBRARY_METADATA` on the per-library metrics, and on the per-library cell metadata with `--index-col PREFIX --index-col cell_barcode` | `<analysis>.library_metrics.txt` and `<analysis>.cell_metadata.txt` |
 | `make_triplet_dge/tests/live.nf.test` | baseline | `MAKE_TRIPLET_DGE` on the baseline's local DGE copies (`tmp/<library>/`) and `<library>.joined_filtered_cell_metadata.txt` barcode lists | `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz` (decompressed content; 104,322 matrix lines for the current baseline) |
 | `make_metacells_from_triplet_dge/tests/live.nf.test` | baseline | `MAKE_METACELLS_FROM_TRIPLET_DGE` on the baseline's matrix, features, barcodes and `<analysis>.cell_metadata.txt`, grouped by `donor` and by `donor` + the column in `<analysis>.cell_type_column.txt` | `<analysis>.donors.metacells.txt.gz` and `<analysis>.donor_cell_type.metacells.txt.gz`, without the `#MakeMetacellsFromTripletDge` header line (it holds absolute paths) |
-| `donor_cell_type_report/tests/live.nf.test` | baseline | `DONOR_CELL_TYPE_REPORT` on `<analysis>.cell_metadata.txt` with the column named in `<analysis>.cell_type_column.txt` (written by the prototype since 2026-10-16: remake an older baseline) | `<analysis>.donor_cell_type.txt` |
+| `donor_cell_type_report/tests/live.nf.test` | baseline | `DONOR_CELL_TYPE_REPORT` on `<analysis>.cell_metadata.txt` with the column named in the baseline's `<analysis>.cell_type_column.txt` (written by the prototype since 2026-10-16: remake an older baseline; the pipeline itself no longer publishes this file) | `<analysis>.donor_cell_type.txt` |
 
 The last four need no network or credentials, but they read files that only the baseline has, so they also need step 1. `run_date` and `run_status` come from the newest Nextflow trace in the bucket, so a newer run of a library makes those two columns differ from an older baseline.
 
@@ -204,3 +205,45 @@ GOOGLE_PROJECT_ID=bican-um1-mccarroll nf-test test modules/local/summarize_scrna
 - `pipeline_info/<analysis>.resolved_libraries.txt` names the right DGE, cell metadata, model, annotations and reduced GTF, and `Donors: yes`.
 - A second test sets `--analysis_id` to the library id and expects the run to stop with the resolver's message before SUMMARIZE, FORMAT or BUILD run.
 
+## Whole pipeline on Google Batch
+
+`tests/batch_full_run/run.sh` runs the whole pipeline on the live manifest (`tests/live_data/manifest.yaml`, analysis id `SMRI_V11.unfiltered`) with `-profile googlebatch`, and checks the result. It is a script and not an nf-test, because nf-test always passes a local `-work-dir` and Google Batch needs a `gs://` one. It is not part of `tests/run_all_tests.sh`. Background on the identities, projects and network: [credentials.md](credentials.md).
+
+### Before you run it
+
+- Application Default Credentials (`gcloud auth application-default login`), `nextflow`, `gsutil`, and the baseline in `tests/live_data/baseline` (see [Live tests](#live-tests-real-data-compared-with-the-baseline), step 1).
+- The project must own the data and be able to write the work bucket. The live data is in `mccarroll-scrna-seq`.
+- Both variables are required by the `googlebatch` profile (an unset one gives a null project, region or network):
+
+```bash
+export GOOGLE_PROJECT_ID=mccarroll-scrna-seq
+export GOOGLE_LOCATION=us-central1
+```
+
+### Run it
+
+```bash
+tests/batch_full_run/run.sh [gs://<bucket>/<path>]
+# default base: gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing
+```
+
+The script uses `<base>/work` as the work directory and `<base>/out` as `--outdir`. It first deletes `<base>/out` so that stale files cannot pass, then runs Nextflow, downloads `<base>/out` to `testing_batch_full_run/out`, and checks. It leaves `work` and `out` in the bucket (delete them when done). The run takes a few minutes, showing Nextflow's colored progress display (`-ansi-log true`, kept even though the script gives Nextflow no terminal) and then the checks. The script reads nothing from the terminal, so it can also be run in the background (`... &`) from an interactive shell. The `testing_batch_full_run/` directory is git-ignored; it holds the downloaded output, `nextflow.log`, and the trace (with `peak_rss`, written locally by `tests/batch_full_run/trace.config`).
+
+### What it checks (each prints PASS or FAIL; the exit status is the number of failures, 1 if the run itself failed, 2 if a prerequisite is missing)
+
+1. Each of the eight merged files equals the baseline (md5 of the decompressed content; the metacell files without their `#MakeMetacellsFromTripletDge` line). `artifacts/` and `tearsheets/` are not compared here (the nf-test live test does that locally).
+2. The top level of `--outdir` is exactly the merged files, `artifacts/`, `tearsheets/` and `pipeline_info/`.
+3. The `WRITE_*` exec processes ran in the head job (`native_id` is `-` in the trace) and every other task was submitted to Google Batch.
+4. Every task is `COMPLETED`, and every Google Batch task ran in a public `quay.io/broadinstitute/drop-seq_python` or `drop-seq_java` image.
+
+It then prints one line per task: the requested memory, `peak_rss` and `realtime`, to tune the memory in `conf/modules.config`.
+
+### Last result (2026-10-21, `mccarroll-scrna-seq`, `us-central1`, with the exact machine types)
+
+All 12 checks passed (the 8 merged files equal the baseline, the top-level listing, `WRITE_*` in the head job, every task `COMPLETED` in the public images). The log had no Cloud Info deprecation warning and no "cannot be executed by 'google-batch' executor" warning. The Google Batch jobs used `n1-standard-2` for the default processes and `n1-standard-8` for the three Java steps (read back with `gcloud batch jobs describe`). Peak memory was 611 MB for `MAKE_TRIPLET_DGE`, about 130 MB for the metacell steps and under 200 MB for the others (requests: 15 GB for the Java steps, 6 GB for the rest), and each task ran for 2 to 9 seconds.
+
+### Things that can go wrong
+
+- `Missing Google project Id`: `GOOGLE_PROJECT_ID` is not exported. (Earlier, an nf-core institutional `googlebatch` profile overrode ours; the institutional configs are no longer loaded.)
+- `CODE_GCE_RESOURCE_NOT_FOUND ... networks/default`: the profile sets the `broad-allow` network from `GOOGLE_PROJECT_ID`; check that the project has it.
+- `Permission denied` or `403` on a bucket: the project in `GOOGLE_PROJECT_ID` cannot reach that bucket (see credentials.md, "The project must have access to the bucket where the data lives").

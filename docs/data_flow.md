@@ -58,7 +58,6 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
                |                in: [meta(lib), mmcAnnotations csv] -> <lib>.mmc.tsv (not published), cell_type_column (string)
                |                all columns -> [groovy] LibraryResolver.checkCellTypeColumn(ids, columns) (fails if they differ)
                |                            -> cell type column (value, '' for none; used by DONOR_CELL_TYPE_REPORT and the metacells)
-               |                            -> [exec] WRITE_CELL_TYPE_COLUMN -> <analysis>.cell_type_column.txt ==> flat in outdir
                |
                +--> [process] BUILD_LIBRARY_CELL_METADATA   (work directory only)                            [done: takes --args-file]
                                 in : cellMetadata, <lib>.mmc.tsv (or []), <lib>.join_and_filter_args.txt, files (staged by base name, or [])
@@ -68,7 +67,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
                |
                +--> ONE sorted list of the built libraries (id, meta, cell metadata, DGE = the manifest DGE), in manifest order (meta.position)
                         |--> [process] MERGE_CELL_METADATA (alias of MERGE_LIBRARY_METADATA; --index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt ==> flat in outdir
-                        |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 16 GB)
+                        |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 15 GB)
                                   -> matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz ==> flat in outdir      [done: edge 5]
                         |
                         |  only if resolver.hasDonors (every library has a manifest donor or a village in its artifacts; a mix fails in the resolver)
