@@ -52,7 +52,6 @@ nextflow_pipeline {
                 { assert rows.every { it.MODEL1_class_name == 'Glut' } },
                 { assert LiveFiles.lines(new File(out, 'barcodes.tsv.gz')) == ['LIB_MMC_1_AAAA', 'LIB_MMC_1_ACAC', 'LIB_MMC_2_AAAA', 'LIB_MMC_2_ACAC'] },
                 // donors and a cell type column: the donor steps run
-                { assert new File(out, 'SYN.cell_type_column.txt').text.trim() == 'MODEL1_class_name' },
                 // the filtered-out cells are not in the matrix either: 3 genes x 4 cells, 8 non-zero entries (gene, cell, count; GENEB is zero in the kept cells)
                 { assert LiveFiles.lines(new File(out, 'features.tsv.gz')).collect { it.split('\t')[1] } == ['GENEA', 'GENEB', 'GENEC'] },
                 { assert matrix.take(1) == ['3\t4\t8'] },
@@ -176,7 +175,6 @@ nextflow_pipeline {
             def header = workflow.success ? LiveFiles.lines(new File(out, 'SYN.donor_cell_type.metacells.txt.gz')).findAll { !it.startsWith('#') }[0].split('\t') as List : []
             assertAll(
                 { assert workflow.success },
-                { assert new File(out, 'SYN.cell_type_column.txt').text.trim() == 'MODEL1_class_name' },
                 // 5 cells of LIB_MMC_1 (donor N1) and 2 of LIB_MMC_SUPER (donor N3); the class of each cell comes from its own library's result
                 { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.donor + ':' + it.MODEL1_class_name } == [
                     'LIB_MMC_1:AAAA:N1:Glut', 'LIB_MMC_1:CCCC:N1:GABA', 'LIB_MMC_1:GGGG:N1:Glut', 'LIB_MMC_1:TTTT:N1:Vip', 'LIB_MMC_1:ACAC:N1:Glut',
@@ -237,7 +235,6 @@ nextflow_pipeline {
             def report = workflow.success ? LiveFiles.lines(new File(out, 'SYN.donor_cell_type.txt')) : []
             assertAll(
                 { assert workflow.success },
-                { assert new File(out, 'SYN.cell_type_column.txt').text.trim() == 'MODEL2_class_name' },
                 // each library's cells carry the MODEL2 classes of that library, and no MODEL1 column
                 { assert !rows[0].containsKey('MODEL1_class_name') },
                 { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.MODEL2_class_name } == [

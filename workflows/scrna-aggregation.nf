@@ -19,7 +19,6 @@ include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_METACELLS } from '../modules/
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_CELL_TYPE_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
 include { WRITE_TEXT_FILE as WRITE_RESOLVED_SUMMARY } from '../modules/local/write_text_file/main'
 include { WRITE_TEXT_FILE as WRITE_ARGS_FILE } from '../modules/local/write_text_file/main'
-include { WRITE_TEXT_FILE as WRITE_CELL_TYPE_COLUMN } from '../modules/local/write_text_file/main'
 include { WRITE_TEXT_FILE as WRITE_VERSIONS } from '../modules/local/write_text_file/main'
 
 /*
@@ -160,16 +159,6 @@ workflow SCRNA_AGGREGATION {
         .collect()
         .map { items -> LibraryResolver.checkCellTypeColumn(items.collect { item -> item.meta.id }.toList(), items.collect { item -> item.cell_type_column }.toList()) ?: '' }
 
-    // Input: cell_type_column (one value) and the analysis id from the resolver result.
-    // Emits: <analysis>.cell_type_column.txt, one file with the column name, published to <outdir>; nothing if there is no column.
-    cell_type_column_file = WRITE_CELL_TYPE_COLUMN(
-        cell_type_column
-            .map { column -> record(column: column) }
-            .combine(analysis_id: resolved.map { result -> result.analysisId })
-            .flatMap { item -> item.column ? [ item ] : [] }
-            .map { item -> record(name: "${item.analysis_id}.cell_type_column.txt", text: item.column + '\n') }
-    )
-
     // Input: libraries (all), the MapMyCells TSV of the libraries with results, and the args files.
     // Emits: one item per library, Library plus mmc_tsv (path, or null for a library without MapMyCells results) and args_file (path).
     mmc_tsvs = annotations
@@ -294,7 +283,6 @@ workflow SCRNA_AGGREGATION {
     matrix: Value<Path> = triplet.map { item -> item.matrix }
     barcodes: Value<Path> = triplet.map { item -> item.barcodes }
     features: Value<Path> = triplet.map { item -> item.features }
-    cell_type_column_file: Channel<Path> = cell_type_column_file
     donor_cell_type_report: Channel<Path> = donor_cell_type_report.map { item -> item.report }
     donor_metacells: Channel<Path> = donor_metacells.map { item -> item.metacells }
     donor_cell_type_metacells: Channel<Path> = donor_cell_type_metacells.map { item -> item.metacells }

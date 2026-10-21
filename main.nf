@@ -95,7 +95,6 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     matrix: Value<Path> = results.matrix
     barcodes: Value<Path> = results.barcodes
     features: Value<Path> = results.features
-    cell_type_column_file: Channel<Path> = results.cell_type_column_file
     donor_cell_type_report: Channel<Path> = results.donor_cell_type_report
     donor_metacells: Channel<Path> = results.donor_metacells
     donor_cell_type_metacells: Channel<Path> = results.donor_cell_type_metacells
@@ -153,7 +152,6 @@ workflow {
     matrix = results.matrix
     barcodes = results.barcodes
     features = results.features
-    cell_type_column_file = results.cell_type_column_file
     donor_cell_type_report = results.donor_cell_type_report
     donor_metacells = results.donor_metacells
     donor_cell_type_metacells = results.donor_cell_type_metacells
@@ -178,7 +176,6 @@ output {
     matrix                    { path '.' }
     barcodes                  { path '.' }
     features                  { path '.' }
-    cell_type_column_file     { path '.' }
     donor_cell_type_report    { path '.' }
     donor_metacells           { path '.' }
     donor_cell_type_metacells { path '.' }
