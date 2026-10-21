@@ -51,7 +51,7 @@ nextflow_pipeline {
                 // Published: the merged results, flat in the output directory, and two per-library records in directories of their own.
                 // Nothing else is published: the top level has exactly these entries.
                 def mergedNames = ["${analysis}.library_metrics.txt", "${analysis}.cell_metadata.txt", 'matrix.mtx.gz', 'barcodes.tsv.gz', 'features.tsv.gz',
-                    "${analysis}.cell_type_column.txt", "${analysis}.donor_cell_type.txt", "${analysis}.donors.metacells.txt.gz",
+                    "${analysis}.donor_cell_type.txt", "${analysis}.donors.metacells.txt.gz",
                     "${analysis}.donor_cell_type.metacells.txt.gz"]
                 results['published: only the merged files, artifacts/, tearsheets/ and pipeline_info/'] =
                     (out.list() as List).sort() == (mergedNames + ['artifacts', 'tearsheets', 'pipeline_info']).sort()

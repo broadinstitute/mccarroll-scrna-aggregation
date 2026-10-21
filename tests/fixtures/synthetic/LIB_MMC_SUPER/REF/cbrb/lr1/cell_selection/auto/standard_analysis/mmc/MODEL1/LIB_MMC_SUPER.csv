@@ -1,0 +1,6 @@
+# metadata = LIB_MMC_SUPER.json
+# taxonomy hierarchy = ["supercluster", "class"]
+# algorithm: 'hierarchical'; codebase: http://github.com/AllenInstitute/cell_type_mapper; version: 1.6.1
+cell_id,supercluster_label,supercluster_name,supercluster_bootstrapping_probability,class_label,class_name,class_bootstrapping_probability
+AAAA,s0,Neuron,0.9000,c0,Glut,0.9000
+CCCC,s1,Neuron,0.9000,c1,GABA,0.9000

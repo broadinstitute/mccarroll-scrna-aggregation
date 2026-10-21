@@ -1,0 +1,9 @@
+# metadata = LIB_MMC_2.json
+# taxonomy hierarchy = ["class", "subclass"]
+# algorithm: 'hierarchical'; codebase: http://github.com/AllenInstitute/cell_type_mapper; version: 1.6.1
+cell_id,class_label,class_name,class_bootstrapping_probability,subclass_label,subclass_name,subclass_bootstrapping_probability
+AAAA,c0,Neuron,0.9000,s0,sub,0.9000
+CCCC,c1,Neuron,0.9000,s1,sub,0.9000
+GGGG,c2,Glia,0.9000,s2,sub,0.9000
+TTTT,c3,Glia,0.9000,s3,sub,0.9000
+ACAC,c4,Neuron,0.9000,s4,sub,0.9000

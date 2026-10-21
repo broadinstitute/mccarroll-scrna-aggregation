@@ -31,7 +31,6 @@ produces (its metrics row, its joined and filtered cell metadata, its MapMyCells
 - `<analysis>.library_metrics.txt` - the library metrics of all libraries, in manifest order.
 - `<analysis>.cell_metadata.txt` - the cell metadata of all libraries (in manifest order), indexed by `PREFIX` and `cell_barcode`.
 - `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz` - the sparse DGE of all libraries (barcodes are `<library>_<cell barcode>`).
-- `<analysis>.cell_type_column.txt` - the name of the cell type column (only if the libraries have MapMyCells results).
 - `<analysis>.donor_cell_type.txt` - cells and median UMIs per donor and cell type (only with donors and a cell type column).
 - `<analysis>.donors.metacells.txt.gz` - expression summed per donor (only with donors).
 - `<analysis>.donor_cell_type.metacells.txt.gz` - expression summed per donor and cell type (only with donors and a cell type column).

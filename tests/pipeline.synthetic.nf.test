@@ -1,0 +1,250 @@
+nextflow_pipeline {
+
+    name "Test the whole pipeline on small synthetic data sets"
+    script "../main.nf"
+    config "./synthetic.config"
+    tag "pipeline"
+    tag "pipeline_synthetic"
+
+    // Workflow tests on tiny local libraries (tests/fixtures/synthetic, see its README.md): real processes in Docker, no gs://, no network. They check what
+    // the live data cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs.
+    // Independent of the other tests: no gs://, no network, and no credentials (a fake key file passes the pre-flight check). Run alone with
+    //   nf-test test tests/pipeline.synthetic.nf.test      (or: nf-test test --tag pipeline_synthetic)
+    // To audit a run: the inputs are in .nf-test/synthetic_root (manifests, artifacts' source files), the outputs in .nf-test/tests/<test id>/output
+    // (published), .../work (every task directory) and .../meta/nextflow.log. The test id is printed in the nf-test output.
+    // The tree is copied to .nf-test/synthetic_root (the path the containers mount, see synthetic.config) with its absolute paths filled in.
+
+    // (nf-test runs from the repository root, where projectDir is not available outside the when and then blocks)
+    def synthetic = { ->
+        def repo = System.getProperty('user.dir')
+        SyntheticTree.materialize(new File("${repo}/tests/fixtures/synthetic".toString()), new File("${repo}/.nf-test/synthetic_root".toString()))
+    }
+    // the rows of a TSV (or .tsv.gz) as maps column -> value, and the header
+    def table = { f ->
+        def lines = LiveFiles.lines(f).findAll { !it.startsWith('#') }
+        def header = lines[0].split('\t', -1) as List
+        lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
+    }
+
+    test("Should apply each manifest entry's donor, filters and join to its own library's cells, and run the donor steps") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_filters.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            def matrix = workflow.success ? LiveFiles.lines(new File(out, 'matrix.mtx.gz')).findAll { !it.startsWith('%') } : []
+            // the metacells have a first line (#MakeMetacellsFromTripletDge ...) that holds the absolute paths of the run
+            def metacells = { name -> LiveFiles.lines(new File(out, name)).findAll { !it.startsWith('#') } }
+            assertAll(
+                { assert workflow.success },
+                // LIB_MMC_1: min pct_mt drops GGGG, max pct_mt drops TTTT, include Glut/Vip drops CCCC (GABA); LIB_MMC_2: includeFile drops TTTT,
+                // excludeFile drops CCCC, exclude GABA drops GGGG. The donor is that of the entry and the join adds extra_flag.
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.donor + ':' + it.extra_flag } ==
+                    ['LIB_MMC_1:AAAA:N1:yes', 'LIB_MMC_1:ACAC:N1:yes', 'LIB_MMC_2:AAAA:N2:yes', 'LIB_MMC_2:ACAC:N2:yes'] },
+                { assert rows.every { it.MODEL1_class_name == 'Glut' } },
+                { assert LiveFiles.lines(new File(out, 'barcodes.tsv.gz')) == ['LIB_MMC_1_AAAA', 'LIB_MMC_1_ACAC', 'LIB_MMC_2_AAAA', 'LIB_MMC_2_ACAC'] },
+                // donors and a cell type column: the donor steps run
+                // the filtered-out cells are not in the matrix either: 3 genes x 4 cells, 8 non-zero entries (gene, cell, count; GENEB is zero in the kept cells)
+                { assert LiveFiles.lines(new File(out, 'features.tsv.gz')).collect { it.split('\t')[1] } == ['GENEA', 'GENEB', 'GENEC'] },
+                { assert matrix.take(1) == ['3\t4\t8'] },
+                { assert matrix.drop(1).collect { it.split('\t') as List }.sort { a, b -> a[1] <=> b[1] ?: a[0] <=> b[0] } == [
+                    ['1', '1', '1'], ['3', '1', '4'], ['1', '2', '3'], ['3', '2', '6'], ['1', '3', '7'], ['3', '3', '3'], ['1', '4', '9'], ['3', '4', '5'] ] },
+                // expression summed per donor (all-zero GENEB is left out): N1 = LIB_MMC_1 AAAA + ACAC, N2 = LIB_MMC_2 AAAA + ACAC
+                { assert metacells('SYN.donors.metacells.txt.gz') == ['GENE\tN1\tN2', 'ENSG01\t4\t16', 'ENSG03\t10\t8'] },
+                // per donor and cell type: every kept cell is Glut, so the same sums under the names N1:Glut and N2:Glut
+                { assert metacells('SYN.donor_cell_type.metacells.txt.gz') == ['GENE\tN1:Glut\tN2:Glut', 'ENSG01\t4\t16', 'ENSG03\t10\t8'] },
+                // the report: 2 cells per donor, all Glut (fraction 1), median num_retained_transcripts 300 = median(100, 500) and 30 = median(10, 50)
+                { assert LiveFiles.lines(new File(out, 'SYN.donor_cell_type.txt')) == [
+                    'donor\tcell_type\tnum_nuclei\tfraction_nuclei\tmedian_umis_per_nucleus', 'N1\tGlut\t2\t1\t300', 'N2\tGlut\t2\t1\t30' ] }
+            )
+        }
+    }
+
+    // A guard against silent library mix-ups (the main test is the filters test above): two libraries with no donors and no MapMyCells results (so the donor and cell type steps are skipped); both have a cell AAAA with different data.
+    test("Should merge two libraries in manifest order, keeping each cell's metadata and counts with its own library") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_plain.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            def metrics = workflow.success ? table(new File(out, 'SYN.library_metrics.txt')) : []
+            def matrix = workflow.success ? LiveFiles.lines(new File(out, 'matrix.mtx.gz')).findAll { !it.startsWith('%') } : []
+            // log.warn goes to the Nextflow log of the run (meta/ is next to output/ and work/)
+            def log = new File(out.parentFile, 'meta/nextflow.log').text
+            assertAll(
+                { assert workflow.success },
+                // manifest order (PLAIN_2 first), not the alphabetical order of the library ids; each cell keeps the value of its own library
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.num_transcripts } ==
+                    ['LIB_PLAIN_2:AAAA:50', 'LIB_PLAIN_2:TTTT:80', 'LIB_PLAIN_1:AAAA:100', 'LIB_PLAIN_1:CCCC:200', 'LIB_PLAIN_1:GGGG:300'] },
+                { assert metrics.collect { it.library } == ['LIB_PLAIN_2', 'LIB_PLAIN_1'] },
+                // the columns of the matrix are the cells of the merged metadata, in the same order
+                { assert LiveFiles.lines(new File(out, 'barcodes.tsv.gz')) ==
+                    ['LIB_PLAIN_2_AAAA', 'LIB_PLAIN_2_TTTT', 'LIB_PLAIN_1_AAAA', 'LIB_PLAIN_1_CCCC', 'LIB_PLAIN_1_GGGG'] },
+                // 3 genes x 5 cells, 8 non-zero entries (gene, cell, count): the counts of each library's own DGE
+                { assert matrix.take(1) == ['3\t5\t8'] },
+                { assert matrix.drop(1).collect { it.split('\t') as List }.sort { a, b -> a[1] <=> b[1] ?: a[0] <=> b[0] } == [
+                    ['1', '1', '7'], ['3', '1', '9'], ['2', '2', '8'], ['1', '3', '1'], ['3', '3', '4'], ['2', '4', '3'], ['1', '5', '2'], ['3', '5', '5'] ] },
+                // no donors and no MapMyCells results: the steps are skipped with a warning, and nothing of them is published
+                { assert log.contains('have no donors') },
+                { assert log.contains('No library has MapMyCells results') },
+                { assert !(out.list() as List).any { it.contains('donor') || it.contains('cell_type') } }
+            )
+        }
+    }
+
+    test("Should fail in MERGE_CELL_METADATA when a library lists the same cell barcode twice") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_duplicate_cell.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.trace.failed().any { it.name.contains('MERGE_CELL_METADATA') } }
+            )
+        }
+    }
+
+    // The cell type column is the top level of the hierarchy of each library's MapMyCells result: LIB_MMC_1 has class > subclass, LIB_MMC_SUPER has
+    // supercluster > class, so by default the libraries disagree (MODEL1_class_name against MODEL1_supercluster_name).
+    test("Should stop when the libraries have different cell type columns") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_cell_type_levels.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            def output = (workflow.stdout + workflow.stderr).join('\n') + log
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('The libraries have different cell type columns') },
+                // the message names each library and its column
+                { assert output.contains('LIB_MMC_1') && output.contains('MODEL1_class_name') },
+                { assert output.contains('LIB_MMC_SUPER') && output.contains('MODEL1_supercluster_name') },
+                // no donor output is made
+                { assert !workflow.trace.tasks().any { it.name.contains('DONOR_') } }
+            )
+        }
+    }
+
+    // The same two libraries with --mmc_level class: both now have MODEL1_class_name, so the run succeeds and the donor by cell type outputs use it.
+    test("Should use the cell type level given by --mmc_level for the cell type column, report and metacells") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_cell_type_levels.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+                mmc_level = 'class'
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            def report = workflow.success ? LiveFiles.lines(new File(out, 'SYN.donor_cell_type.txt')) : []
+            def header = workflow.success ? LiveFiles.lines(new File(out, 'SYN.donor_cell_type.metacells.txt.gz')).findAll { !it.startsWith('#') }[0].split('\t') as List : []
+            assertAll(
+                { assert workflow.success },
+                // 5 cells of LIB_MMC_1 (donor N1) and 2 of LIB_MMC_SUPER (donor N3); the class of each cell comes from its own library's result
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.donor + ':' + it.MODEL1_class_name } == [
+                    'LIB_MMC_1:AAAA:N1:Glut', 'LIB_MMC_1:CCCC:N1:GABA', 'LIB_MMC_1:GGGG:N1:Glut', 'LIB_MMC_1:TTTT:N1:Vip', 'LIB_MMC_1:ACAC:N1:Glut',
+                    'LIB_MMC_SUPER:AAAA:N3:Glut', 'LIB_MMC_SUPER:CCCC:N3:GABA' ] },
+                // report: cells, fraction of the donor's cells and median num_retained_transcripts per donor and class
+                { assert report.take(1) == ['donor\tcell_type\tnum_nuclei\tfraction_nuclei\tmedian_umis_per_nucleus'] },
+                { assert report.drop(1).sort() == [
+                    'N1\tGABA\t1\t0.2\t200', 'N1\tGlut\t3\t0.6\t300', 'N1\tVip\t1\t0.2\t400', 'N3\tGABA\t1\t0.5\t2000', 'N3\tGlut\t1\t0.5\t1000' ] },
+                // metacells: one column per donor and class (GENE is the first column)
+                { assert header.drop(1).sort() == ['N1:GABA', 'N1:Glut', 'N1:Vip', 'N3:GABA', 'N3:Glut'] }
+            )
+        }
+    }
+
+    // LIB_MMC_1 has a donor in its manifest entry and LIB_PLAIN_1 has none: one matrix cannot have donors for only some libraries.
+    test("Should stop at the resolver when only some libraries have donors") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_mixed_donors.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            def output = (workflow.stdout + workflow.stderr).join('\n') + log
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('Either all libraries have donors or none do') },
+                // both libraries are named, with the one that has donors and the one that has none
+                { assert output.contains('LIB_MMC_1') && output.contains('LIB_PLAIN_1') },
+                // the error comes before any per-library process
+                { assert !workflow.trace.tasks().any { it.name.contains('SUMMARIZE') || it.name.contains('FORMAT') || it.name.contains('BUILD') } }
+            )
+        }
+    }
+
+    // LIB_MMC_1 and LIB_MMC_2 each have two MapMyCells models: MODEL1 (the first, used by default, with the classes Glut/GABA/Vip) and MODEL2
+    // (the classes Neuron/Glia). --mmc_model MODEL2 must select MODEL2 in every library.
+    test("Should use the MapMyCells model given by --mmc_model in every library") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_mmc_model.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+                mmc_model = 'MODEL2'
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            def report = workflow.success ? LiveFiles.lines(new File(out, 'SYN.donor_cell_type.txt')) : []
+            assertAll(
+                { assert workflow.success },
+                // each library's cells carry the MODEL2 classes of that library, and no MODEL1 column
+                { assert !rows[0].containsKey('MODEL1_class_name') },
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.MODEL2_class_name } == [
+                    'LIB_MMC_1:AAAA:Neuron', 'LIB_MMC_1:CCCC:Glia', 'LIB_MMC_1:GGGG:Neuron', 'LIB_MMC_1:TTTT:Glia', 'LIB_MMC_1:ACAC:Neuron',
+                    'LIB_MMC_2:AAAA:Neuron', 'LIB_MMC_2:CCCC:Neuron', 'LIB_MMC_2:GGGG:Glia', 'LIB_MMC_2:TTTT:Glia', 'LIB_MMC_2:ACAC:Neuron' ] },
+                // report per donor and MODEL2 class: N1 Neuron = AAAA, GGGG, ACAC (100, 300, 500); N1 Glia = CCCC, TTTT (200, 400);
+                // N2 Neuron = AAAA, CCCC, ACAC (10, 20, 50); N2 Glia = GGGG, TTTT (30, 40)
+                { assert report.drop(1).sort() == [
+                    'N1\tGlia\t2\t0.4\t300', 'N1\tNeuron\t3\t0.6\t300', 'N2\tGlia\t2\t0.4\t35', 'N2\tNeuron\t3\t0.6\t20' ] }
+            )
+        }
+    }
+}

@@ -1,0 +1,5 @@
+# LIB_MMC_1 has a donor and LIB_PLAIN_1 has none: the libraries cannot be merged
+dges:
+  - dge: @ROOT@/LIB_MMC_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_1.selected.digital_expression.txt.gz
+    donor: N1
+  - dge: @ROOT@/LIB_PLAIN_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_PLAIN_1.selected.digital_expression.txt.gz

@@ -4,7 +4,7 @@
 #   docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml \
 #       --analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current
 # See docs/testing.md. Needs GOOGLE_PROJECT_ID in the environment, for example: export GOOGLE_PROJECT_ID=bican-um1-mccarroll
-# To run one file or one test, see "Running one file or one test" in docs/testing.md.
+# To run one file or one test, see "How to run the tests" in docs/testing.md.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)

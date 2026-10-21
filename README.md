@@ -46,7 +46,7 @@ nextflow run mccarroll/scrna-aggregation \
    --outdir <OUTDIR>
 ```
 
-The manifest options (donor, filters, joins, defaults) and the optional parameters (`--reference`, `--mmc_model`, `--mmc_level`) are described in
+The manifest options (donor, filters, joins, defaults) and the optional parameters (`--mmc_model`, `--mmc_level`) are described in
 [docs/usage.md](docs/usage.md), and the files in `<OUTDIR>` in [docs/output.md](docs/output.md). The documentation index is [docs/README.md](docs/README.md); running the
 tests is described in [docs/testing.md](docs/testing.md).
 

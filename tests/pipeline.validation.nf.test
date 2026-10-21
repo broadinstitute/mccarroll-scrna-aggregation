@@ -86,4 +86,52 @@ nextflow_pipeline {
             )
         }
     }
+
+    // --help is handled in PIPELINE_INITIALISATION, so it ends the run before any process: a bare --help reaches the pipeline as the string
+    // 'true' (PIPELINE_INITIALISATION prints the general help itself), --help <parameter name> is handled by the nf-core help code.
+    // The help is logged at INFO level, which nf-test leaves out of workflow.stdout unless it runs with --verbose, so the tests read it from the
+    // run's nextflow.log. They look for words of the parameter descriptions in nextflow_schema.json: the log also has the example command.
+
+    test("Should print the general help and succeed, without starting a process, with a bare --help") {
+
+        when {
+            params {
+                help = 'true'
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n') + file("${metaDir}/nextflow.log").text
+            assertAll(
+                { assert workflow.success },
+                { assert output.contains('Typical pipeline command') },
+                // the description of the pipeline's parameters are listed: all of them, not one
+                { assert output.contains('Label for this aggregation') },
+                { assert output.contains('MapMyCells model to use instead of the first model') },
+                { assert !output.contains('does not exist in JSON schema') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
+
+    test("Should describe one parameter, and succeed, with --help and a parameter name") {
+
+        when {
+            params {
+                help = 'analysis_id'
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n') + file("${metaDir}/nextflow.log").text
+            assertAll(
+                { assert workflow.success },
+                // the description and the pattern of that parameter only, not the other parameters
+                { assert output.contains('Label for this aggregation') },
+                { assert output.contains('pattern') },
+                { assert !output.contains('MapMyCells model to use instead of the first model') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
 }

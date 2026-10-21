@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "merge_library_metadata"
 
-    // Contract: tuple val(meta), path(tsvs) -> combined: tuple val(meta), path('<ext.prefix ?: meta.id>.txt').
+    // Contract: record(meta: Map, tsvs: List<Path>) -> combined: record(meta: Map, combined: Path '<ext.prefix ?: meta.id>.txt').
     // Output columns are the union of the input columns (missing values empty); rows are the inputs' rows in input order.
     // The file-level config sets no ext.args; a test needing --index-col sets index.config itself. There is no live test: the merged outputs are checked by the final integration test.
     // Fixtures: tests/fixtures/README.md.
@@ -20,19 +20,19 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_b.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_b.tsv") ])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.combined[0][1])
+            def lines = tsvLines(process.out.combined[0].combined)
             assertAll(
                 { assert process.success },
                 { assert process.out.combined.size() == 1 },
                 // meta propagated, name from meta.id
-                { assert process.out.combined[0][0] == [ id:'analysis1' ] },
-                { assert file(process.out.combined[0][1]).name == 'analysis1.txt' },
+                { assert process.out.combined[0].meta == [ id:'analysis1' ] },
+                { assert file(process.out.combined[0].combined).name == 'analysis1.txt' },
                 // header + 2 + 2 rows; same header; rows of lib_a first, then lib_b, content unchanged
                 { assert lines.size() == 5 },
                 { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'donor'] },
@@ -48,13 +48,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_c_extra_column.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_c_extra_column.tsv") ])
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.combined[0][1])
+            def lines = tsvLines(process.out.combined[0].combined)
             assertAll(
                 { assert process.success },
                 // union of columns: the extra column is added at the end
@@ -72,7 +72,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv") ])
                 """
             }
         }
@@ -80,7 +80,7 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert file(process.out.combined[0][1]).text == file("${moduleDir}/tests/fixtures/lib_a.tsv").text }
+                { assert file(process.out.combined[0].combined).text == file("${moduleDir}/tests/fixtures/lib_a.tsv").text }
             )
         }
     }
@@ -93,7 +93,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'analysis1' ], [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_a_duplicate_cell.tsv") ] ]
+                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_a_duplicate_cell.tsv") ])
                 """
             }
         }

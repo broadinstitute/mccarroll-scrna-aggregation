@@ -4,12 +4,16 @@ How the manifest, the artifacts and the `join_and_filter_tsv` arguments flow thr
 resolver work of sessions 5 and 6. Status: the Groovy classes and their tests are done; the inputs (edge 0), LOCATE (1), the library resolver (2, in the workflow), SUMMARIZE + MERGE_LIBRARY_METRICS (3)
 and FORMAT_MAPMYCELLS_ANNOTATIONS + BUILD_LIBRARY_CELL_METADATA (4) are wired; **all steps are wired**; `RESOLVE_AGGREGATION_MANIFEST` has been deleted (replaced by the Groovy `LibraryResolver`).
 
-Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no container, pure functions in `lib/`, unit tested); `==>` a published file.
+Legend: `[process]` runs in a container; `[exec]` is an `exec` process (`WRITE_TEXT_FILE`: runs in the head job, no container, no VM); `[groovy]` runs in the head job (no container, pure functions in `lib/`, unit tested); `==>` a published file.
+
+Typing: the scripts use `nextflow.enable.types = true`. Channel items are records, not tuples: `Manifest(meta, manifest)` from the initialisation, a `Library(id, meta, dge, cell_metadata, mmc_annotations, args, files)` record
+declared in `workflows/scrna-aggregation.nf` for each library, and the process inputs and outputs listed in [testing.md](testing.md). Per-library pieces are joined with `join(by: 'id')`, not by tuple position.
+`params` is a typed block in `main.nf` (types only); the default values are in `conf/params.config`, included by `nextflow.config`.
 
 ## The flow
 
 ```
-  params.manifest (YAML: dgeDefaults + dges[dge, donor, filters, joins])           analysis id, params.reference, params.mmc_model
+  params.manifest (YAML: dgeDefaults + dges[dge, donor, filters, joins])           analysis id, params.mmc_model
         |
         v
  [groovy] PIPELINE_INITIALISATION  (fails here, before any cloud access)
@@ -38,24 +42,22 @@ Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no con
         |           no staged file named like the task's own files
         |  -> libraries{ id -> record }, reducedGtf, reference
         |
-        +--> LibraryResolver.summaryText -> <analysis>.resolved_libraries.txt ==> pipeline_info/   (plain text for people; nothing reads it back)
+        +--> LibraryResolver.summaryText -> [exec] WRITE_RESOLVED_SUMMARY -> <analysis>.resolved_libraries.txt ==> pipeline_info/   (plain text for people; nothing reads it back)
         |
-        +--> flatMap -> one item per library: [meta(id=library, analysis_id, mmc_model), record]   (ch_libraries; record = real Groovy values:
-                |   libraryId, dge, cellMetadata, mmcModel, mmcAnnotations, args (List), files (List))
+        +--> flatMap (toLibraries) -> one Library record per library: id, meta(id=library, analysis_id, mmc_model), dge, cell_metadata, mmc_annotations, args (List), files (List)
         |
         +--> per library (ch_libraries items; the pieces are joined on the library id)
                |
-               +--> collectFile { JoinFilterArguments.toArgsFileText(record.args) } -> <lib>.join_and_filter_args.txt   (ch_args_files; work directory only, not published)
+               +--> [exec] WRITE_ARGS_FILE { JoinFilterArguments.toArgsFileText(library.args) } -> <lib>.join_and_filter_args.txt   (work directory only, not published)
                |
                +--> [process] SUMMARIZE_SCRNA_EXPERIMENTS       in: [meta(lib), artifacts/<lib>.yaml] (YAML picked from the artifacts directory by file name = library id)
                |                                                 -> <lib>.library_metrics.txt (work directory only), tearsheet ==> tearsheets/
-               |                  all libraries, in manifest order (meta.position) -> [process] MERGE_LIBRARY_METRICS -> <analysis>.library_metrics.txt ==> flat in outdir
+               |                  all libraries, in manifest order (meta.position; collect() then toSorted) -> [process] MERGE_LIBRARY_METRICS -> <analysis>.library_metrics.txt ==> flat in outdir
                |
                +--> [process] FORMAT_MAPMYCELLS_ANNOTATIONS     only if mmcAnnotations != NA (ext.args: --column-prefix <model>_ [--level params.mmc_level])
                |                in: [meta(lib), mmcAnnotations csv] -> <lib>.mmc.tsv (not published), cell_type_column (string)
-               |                all columns -> [groovy] LibraryResolver.checkCellTypeColumn (fails if they differ)
-               |                            -> ch_cell_type_column (value, '' for none; for DONOR_CELL_TYPE_REPORT / metacells [todo])
-               |                            -> <analysis>.cell_type_column.txt ==> flat in outdir
+               |                all columns -> [groovy] LibraryResolver.checkCellTypeColumn(ids, columns) (fails if they differ)
+               |                            -> cell type column (value, '' for none; used by DONOR_CELL_TYPE_REPORT and the metacells)
                |
                +--> [process] BUILD_LIBRARY_CELL_METADATA   (work directory only)                            [done: takes --args-file]
                                 in : cellMetadata, <lib>.mmc.tsv (or []), <lib>.join_and_filter_args.txt, files (staged by base name, or [])
@@ -63,9 +65,9 @@ Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no con
                                        --args-file <lib>.join_and_filter_args.txt
                                 out: <lib>.joined_filtered_cell_metadata.txt
                |
-               +--> ONE list of [library id, meta, cell metadata, DGE (record.dge, the manifest DGE)] per library, sorted by meta.position (manifest order)   (ch_built_sorted)
+               +--> ONE sorted list of the built libraries (id, meta, cell metadata, DGE = the manifest DGE), in manifest order (meta.position)
                         |--> [process] MERGE_CELL_METADATA (alias of MERGE_LIBRARY_METADATA; --index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt ==> flat in outdir
-                        |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 16 GB)
+                        |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 15 GB)
                                   -> matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz ==> flat in outdir      [done: edge 5]
                         |
                         |  only if resolver.hasDonors (every library has a manifest donor or a village in its artifacts; a mix fails in the resolver)
@@ -88,6 +90,9 @@ Legend: `[process]` runs in a container; `[groovy]` runs in the head job (no con
 | How the arguments reach the tool | `<lib>.join_and_filter_args.txt` written by RESOLVE, expanded by the shell in the prototype | the same file, written by the workflow, read by `join_and_filter_tsv --args-file` (no `ext.args`, no shell quoting) |
 | `libraries.tsv` | RESOLVE output with task-local paths | `LibraryResolver.resolve` result, kept as Groovy values in the channel; `LibraryResolver.summaryText` writes it as plain text to `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` for people |
 | New checks | | same user_dge in two artifacts; libraries with MapMyCells results of different models (set `mmc_model`); staged files named like `<lib>.mmc.tsv`, the arguments file, the cell metadata or the output |
+
+The software versions are written the same way: `WRITE_VERSIONS` (exec) writes `scrna-aggregation_software_versions.yml` to `pipeline_info/`. The old `topic: versions` channel is gone.
+Publishing: `SCRNA_AGGREGATION` emits one channel per published file; the entry workflow in `main.nf` lists them in `publish:` and the `output { }` block says where each goes under `--outdir` (`outputDir` in `nextflow.config`, mode `publish_dir_mode`). Nothing else is published. There is no `publishDir` any more.
 
 ## Where to look when something looks wrong
 - What did the YAML become? `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` (plain text: per library the DGE, cell metadata, MapMyCells result, extra files and arguments) and `<lib>.join_and_filter_args.txt` (the exact arguments, one per line; not

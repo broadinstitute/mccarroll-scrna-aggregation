@@ -1,4 +1,6 @@
 #!/usr/bin/env nextflow
+
+nextflow.enable.types = true
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     mccarroll/scrna-aggregation
@@ -14,8 +16,47 @@
 */
 
 include { SCRNA_AGGREGATION  } from './workflows/scrna-aggregation'
+include { Manifest                } from './subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
 include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
 include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_scrna-aggregation_pipeline'
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PARAMETERS (types only: the default values are in conf/params.config)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Path-like parameters are Strings on purpose: they may be gs:// URLs, and the pipeline checks them itself
+    (nf-schema and PIPELINE_INITIALISATION) with messages that name the parameter.
+    A String? parameter is optional (null when not given); the others always have a default in conf/params.config.
+    `help` is a String?: --help <parameter name> describes that parameter. A bare --help (the schema also allows a flag) reaches the
+    nf-core help code as the string 'true' and fails there with "Specified param 'true' does not exist in JSON schema" (it did before typing too).
+*/
+
+params {
+    // Input options
+    manifest: String?               // YAML aggregation manifest (local path or gs://)
+    analysis_id: String?            // label of this aggregation: prefix of the merged output files
+    mmc_model: String?              // MapMyCells model to use instead of the first model of each library
+    mmc_level: String?              // MapMyCells taxonomy level for the cell type column
+    outdir: String?                 // directory where the results are published
+    gcp_credentials_file: String?   // GCP credentials JSON mounted into task containers (docker profile)
+
+    // Boilerplate options
+    publish_dir_mode: String
+    monochrome_logs: Boolean
+    help: String?                   // display the help and exit; --help <parameter name> describes that parameter
+    help_full: Boolean
+    show_hidden: Boolean
+    version: Boolean
+    validate_params: Boolean
+    pipelines_testdata_base_path: String
+    trace_report_suffix: String
+
+    // Config options
+    config_profile_name: String?
+    config_profile_description: String?
+    config_profile_contact: String?
+    config_profile_url: String?
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     NAMED WORKFLOWS FOR PIPELINE
@@ -28,18 +69,35 @@ include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_scrn
 workflow MCCARROLL_SCRNA_AGGREGATION {
 
     take:
-    manifest // value channel: tuple val(meta), path(manifest); meta.id is the analysis id
-    entries  // value channel: list of manifest entries, in manifest order
+    manifest: Value<Manifest>   // one item: record(meta: [id: analysis id], manifest: path)
+    entries: Value<List<Map>>   // one item: the list of manifest entries, in manifest order
+    mmc_model: String?          // params.mmc_model, the MapMyCells model that replaces each library's first model
 
     main:
 
     //
     // WORKFLOW: Run pipeline
     //
-    SCRNA_AGGREGATION (
+    results = SCRNA_AGGREGATION (
         manifest,
-        entries
+        entries,
+        mmc_model
     )
+
+    // The published files, one channel of paths each (see the output block below).
+    emit:
+    artifacts: Value<Path> = results.artifacts
+    tearsheets: Channel<Path> = results.tearsheets
+    library_metrics: Value<Path> = results.library_metrics
+    cell_metadata: Value<Path> = results.cell_metadata
+    matrix: Value<Path> = results.matrix
+    barcodes: Value<Path> = results.barcodes
+    features: Value<Path> = results.features
+    donor_cell_type_report: Channel<Path> = results.donor_cell_type_report
+    donor_metacells: Channel<Path> = results.donor_metacells
+    donor_cell_type_metacells: Channel<Path> = results.donor_cell_type_metacells
+    resolved_summary: Value<Path> = results.resolved_summary
+    versions_file: Value<Path> = results.versions_file
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -53,7 +111,8 @@ workflow {
     //
     // SUBWORKFLOW: Run initialisation tasks
     //
-    PIPELINE_INITIALISATION (
+    // Emits: init.manifest (one Manifest record, meta.id is the analysis id) and init.entries (one list of manifest entries).
+    init = PIPELINE_INITIALISATION (
         params.version,
         params.validate_params,
         params.monochrome_logs,
@@ -69,9 +128,10 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
-    MCCARROLL_SCRNA_AGGREGATION (
-        PIPELINE_INITIALISATION.out.manifest,
-        PIPELINE_INITIALISATION.out.entries
+    results = MCCARROLL_SCRNA_AGGREGATION (
+        init.manifest,
+        init.entries,
+        params.mmc_model
     )
     //
     // SUBWORKFLOW: Run completion tasks
@@ -80,6 +140,46 @@ workflow {
         params.outdir,
         params.monochrome_logs,
     )
+
+    // Each name is a channel of paths from the main workflow; the output block says where it is published, under --outdir.
+    publish:
+    artifacts = results.artifacts
+    tearsheets = results.tearsheets
+    library_metrics = results.library_metrics
+    cell_metadata = results.cell_metadata
+    matrix = results.matrix
+    barcodes = results.barcodes
+    features = results.features
+    donor_cell_type_report = results.donor_cell_type_report
+    donor_metacells = results.donor_metacells
+    donor_cell_type_metacells = results.donor_cell_type_metacells
+    resolved_summary = results.resolved_summary
+    versions_file = results.versions_file
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    OUTPUT: where the published files go, relative to --outdir (outputDir in nextflow.config)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Nothing else is published: the per-library intermediates stay in the work directories. The merged results are flat in --outdir.
+*/
+
+output {
+    // per-library records: artifacts/<uei>.yaml (the directory LOCATE writes) and tearsheets/<uei>.standard_analysis_tearsheet.txt
+    artifacts                 { path '.' }
+    tearsheets                { path '.' }   // the task output is already tearsheets/<uei>.standard_analysis_tearsheet.txt
+    // merged results, flat
+    library_metrics           { path '.' }
+    cell_metadata             { path '.' }
+    matrix                    { path '.' }
+    barcodes                  { path '.' }
+    features                  { path '.' }
+    donor_cell_type_report    { path '.' }
+    donor_metacells           { path '.' }
+    donor_cell_type_metacells { path '.' }
+    // pipeline_info/
+    resolved_summary          { path 'pipeline_info' }
+    versions_file             { path 'pipeline_info' }
 }
 
 /*

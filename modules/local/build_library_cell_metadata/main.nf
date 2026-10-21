@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 process BUILD_LIBRARY_CELL_METADATA {
     tag "$meta.id"
     label 'process_single'
@@ -8,15 +10,24 @@ process BUILD_LIBRARY_CELL_METADATA {
     input:
     // meta.id is the library id (written to the PREFIX column).
     // cell_metadata: the library's cell metadata TSV with a cell_barcode column.
-    // mmc_tsv: formatted MapMyCells TSV (cell_id column) to left-join on cell_barcode, or [] for none.
+    // mmc_tsv: formatted MapMyCells TSV (cell_id column) to left-join on cell_barcode, or null for none.
     // args_file: the manifest's donor, joins and filters as join_and_filter_tsv arguments, one per line (an empty file for none), read with
     //   --args-file. It is the only source of these arguments (there is no ext.args), and as a staged input it stays in the task directory.
-    // extra_files: files that args_file refers to (--join/--include-file ...), staged by base name, or [] for none.
-    tuple val(meta), path(cell_metadata), path(mmc_tsv), path(args_file), path(extra_files)
+    // extra_files: files that args_file refers to (--join/--include-file ...), staged by base name, or an empty list for none.
+    record(
+        meta: Map,
+        cell_metadata: Path,
+        mmc_tsv: Path?,
+        args_file: Path,
+        extra_files: List<Path>
+    )
 
     output:
     // PREFIX first, then the input columns, the MapMyCells columns and any joins; rows removed by filters are dropped
-    tuple val(meta), path("${task.ext.prefix ?: meta.id}.joined_filtered_cell_metadata.txt"), emit: cell_metadata
+    cell_metadata = record(
+        meta: meta,
+        cell_metadata: file("${task.ext.prefix ?: meta.id}.joined_filtered_cell_metadata.txt")
+    )
 
     script:
     // The arguments file comes after the MapMyCells join, so the manifest's filters can use its columns.

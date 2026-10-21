@@ -1,317 +1,249 @@
 # mccarroll/scrna-aggregation: Testing
 
-Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the repository root. For the coding
-conventions and known pitfalls, see [development.md](development.md).
+Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the repository root. For coding conventions and known pitfalls, see [development.md](development.md).
+
+## Contents
+
+- [Test conventions](#test-conventions)
+- [How to run the tests](#how-to-run-the-tests)
+- [Unit tests](#unit-tests)
+- [Pipeline tests on synthetic libraries](#pipeline-tests-on-synthetic-libraries)
+- [Live tests](#live-tests-real-data-compared-with-the-baseline)
+- [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)
 
 ## Test conventions
 
-- Unit tests sit next to the unit, as in nf-core: `modules/local/<tool>/tests/main.nf.test`, with a `nextflow.config`
-  and `fixtures/` beside it. Pipeline-level tests go in the top-level `tests/`.
+- Unit tests sit next to the unit, as in nf-core: `modules/local/<tool>/tests/main.nf.test`, with a `nextflow.config` and `fixtures/` beside it (each fixture directory has a README). Pipeline-level tests go in the top-level `tests/`. Fixtures are tiny, synthetic and never shared between units.
 - Test names start with `Should ...`.
-- One test file per unit for the unit's tests (`main.nf.test`). Split into a second file only when the tests serve very
-  different purposes, such as synthetic fixtures (`main.nf.test`) versus real data (`gcs.nf.test`).
-  Tests of one unit that need a different config (for example another `ext.args`) stay in the same file: nf-test accepts
-  `config "./x.config"` inside a single `test` block, which overrides the file-level config for that test. nf-test has
-  no way for one file to include another; it discovers every `*.nf.test` under the path you give it.
+- Typed processes (`nextflow.enable.types = true`) take `record(...)` inputs: nf-test rejects a plain Groovy Map there. A single output is a named record (`name = record(...)`), and a test reads `process.out.<name>[0].<field>`.
+- One test file per unit (`main.nf.test`). A second file is used only when the tests serve different purposes, such as fixtures (`main.nf.test`) versus real data (`gcs.nf.test`). A test that needs another config (for example another `ext.args`) uses `config "./x.config"` inside its `test` block.
 
 ## How to run the tests
 
-To run everything, first make the baseline once (step 1 under [Live tests](#live-tests-real-data-compared-with-the-baseline)),
-then run `tests/run_all_tests.sh` (step 2). The fixture tests alone need no baseline: see the table.
-
 | What | Needs | Command |
 |---|---|---|
-| Pre-flight credentials check (12 tests, `preflight.function.nf.test`) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (all tests in the directory) |
-| `LOCATE_SCRNA_ARTIFACTS`, fixture tests (6) | Docker (the public `current` image is pulled) | `nf-test test modules/local/locate_scrna_artifacts/tests/main.nf.test` |
-| `SUMMARIZE_SCRNA_EXPERIMENTS`, fixture tests (2) | Docker (the public `current` image is pulled) | `nf-test test modules/local/summarize_scrna_experiments/tests/main.nf.test` |
-| `MERGE_LIBRARY_METADATA`, fixture tests (4, `main.nf.test`) | Docker (the public `current` image is pulled) | `nf-test test modules/local/merge_library_metadata/tests/main.nf.test` |
-| `FORMAT_MAPMYCELLS_ANNOTATIONS`, fixture tests (4, `main.nf.test`) | Docker (the public `current` image is pulled) | `nf-test test modules/local/format_mapmycells_annotations/tests/main.nf.test` |
-| `BUILD_LIBRARY_CELL_METADATA`, fixture tests (6, `main.nf.test`) | Docker (the public `current` image is pulled) | `nf-test test modules/local/build_library_cell_metadata/tests/main.nf.test` |
-| `MAKE_TRIPLET_DGE`, fixture tests (4, `main.nf.test`) | Docker (the public `current` Java image is pulled) | `nf-test test modules/local/make_triplet_dge/tests/main.nf.test` |
-| Pipeline input validation (4, `tests/pipeline.validation.nf.test`) | `GOOGLE_PROJECT_ID` (the pre-flight check); no containers start | `nf-test test tests/pipeline.validation.nf.test` |
-| Whole pipeline against the baseline, and a run that stops in the resolver (2 live tests, `tests/pipeline.live.nf.test`; grows with each wired edge) | Docker, network, ADC, `GOOGLE_PROJECT_ID`, the baseline | `GOOGLE_PROJECT_ID=bican-um1-mccarroll nf-test test tests/pipeline.live.nf.test` |
-| `MAKE_METACELLS_FROM_TRIPLET_DGE`, fixture tests (5, `main.nf.test`) | Docker (the public `current` Java image is pulled) | `nf-test test modules/local/make_metacells_from_triplet_dge/tests/main.nf.test` |
-| Manifest parsing (12 tests, `manifest.function.nf.test`) | Nothing (no Docker, no network) | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/manifest.function.nf.test` |
-| `join_and_filter_tsv` arguments (7 tests, `arguments.function.nf.test`) | Nothing (no Docker, no network) | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/arguments.function.nf.test` |
-| Library resolver, summary text, donors and cell type column check (12 tests, `resolver.function.nf.test`) | Nothing (no Docker, no network) | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/resolver.function.nf.test` |
-| Library resolver against the baseline (1 live test, `resolver.live.nf.test`) | The baseline only | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/resolver.live.nf.test` |
-| `DONOR_CELL_TYPE_REPORT`, fixture tests (3, `main.nf.test`) | Docker (the public `current` image is pulled) | `nf-test test modules/local/donor_cell_type_report/tests/main.nf.test` |
-| Everything: 92 tests today (12 pre-flight, 12 manifest, 7 arguments, 12 resolver, 34 module fixture, 4 pipeline validation, 9 module/resolver live, 2 pipeline live) | Docker, network, ADC, `GOOGLE_PROJECT_ID`, and a baseline made first (Live tests, step 1) | `tests/run_all_tests.sh` (stops at once with "no baseline" if step 1 was not done) |
+| Unit tests of the Groovy code and pre-flight check (44) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (the live resolver test in that directory also needs the baseline) |
+| Unit tests of one module | Docker (the public images; `WRITE_TEXT_FILE` needs nothing) | `nf-test test modules/local/<module>/tests/main.nf.test` |
+| Pipeline tests on synthetic libraries (7) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
+| Pipeline input validation and `--help` (6) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
+| Live tests (11) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
+| Whole pipeline on Google Batch (a script, not an nf-test; costs a little money) | `nextflow`, `gsutil`, Application Default Credentials, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION` and the baseline | `tests/batch_full_run/run.sh` (see [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)) |
+| Everything: 104 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
 
-The table lists the tests that need no baseline. The live tests are in the next section.
+To run less: add the ID nf-test prints in brackets to select one test (`...main.nf.test@14bbfafa`; the ID changes if the test is renamed), `--dry-run` to list what would run, or select by tag (`live`, `gcs`, `pipeline_synthetic`). A plain `nf-test test` also runs the live tests, which fail without the baseline, so use the script or select by path. `nf-test.config` sets the default profile to `docker,test`. Test output goes to `.nf-test/` (git-ignored).
+
+## Unit tests
+
+One line per unit; the fixtures and the exact assertions are in each unit's `tests/` directory.
+
+| Unit (`tests/` next to it) | Tests | What they check |
+|---|---|---|
+| Pre-flight credentials check (`preflight.function.nf.test`) | 12 | fails before any process, naming the problem and the remedy, for a missing, unreadable, non-JSON, wrongly typed or incomplete credentials file, or no project ID; passes for valid `authorized_user` and `service_account` files; skipped without the `docker` profile |
+| Manifest parsing (`manifest.function.nf.test`) | 12 | `dgeDefaults` are projected deeply onto each entry; unknown keys, bad types, duplicate DGEs and line breaks in values are rejected with a message naming the entry |
+| `join_and_filter_tsv` arguments (`arguments.function.nf.test`) | 7 | donor, joins and filters become the right arguments in the right order (as the Python resolver writes them); files are staged once by base name; two files with one base name are rejected |
+| Library resolver (`resolver.function.nf.test`) | 13 | each manifest entry is matched to its artifact; libraries are in manifest order; one reference, one reduced GTF and one MapMyCells model are enforced; all libraries have donors or none; cell type column and staged-name checks |
+| `LOCATE_SCRNA_ARTIFACTS` | 6 | one artifact YAML per library; missing optional artifacts are `NA`; the latest trace is chosen; a duplicate experiment fails |
+| `SUMMARIZE_SCRNA_EXPERIMENTS` | 2 | one metrics row and tearsheet per library with exact values; all-`NA` artifacts still succeed |
+| `WRITE_TEXT_FILE` | 2 | the text is written byte for byte; empty text gives an empty file |
+| `MERGE_LIBRARY_METADATA` | 4 | rows kept in input order; columns are united; with `--index-col`, a duplicate (`PREFIX`, `cell_barcode`) fails |
+| `FORMAT_MAPMYCELLS_ANNOTATIONS` | 4 | columns are prefixed; the cell type column is the top taxonomy level or the one requested with `--level`; a bad level fails |
+| `BUILD_LIBRARY_CELL_METADATA` | 6 | `PREFIX` first; the MapMyCells left join; donor, filters and an extra joined file from the arguments file; awkward argument values are applied as written |
+| `MAKE_TRIPLET_DGE` | 4 | prefixed barcodes in library order; only the cells in each barcode list; features; a duplicate barcode fails |
+| `DONOR_CELL_TYPE_REPORT` | 3 | counts, fractions and medians per donor and cell type; cells without a donor or cell type are handled as documented; a missing column fails |
+| `MAKE_METACELLS_FROM_TRIPLET_DGE` | 5 | sums per donor, and per donor and cell type; unmatched cells are in no metacell; the same barcode in two libraries stays separate; an unknown column fails |
+| Pipeline input validation and `--help` (`tests/pipeline.validation.nf.test`) | 6 | a missing manifest, a missing or unsafe analysis id and a manifest with an unknown key stop the run before any process; `--help` and `--help <parameter>` print the help |
+
+## Pipeline tests on synthetic libraries
+
+`tests/pipeline.synthetic.nf.test` (7 tests): the whole pipeline on tiny local libraries, with real processes in Docker. They check what the live manifest (one library, no filters or joins) cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs. They are independent of the other tests: no `gs://`, no network, no credentials and no baseline (a fake service account key passes the pre-flight check, so `GOOGLE_PROJECT_ID` is not needed). Run them alone:
+
+```bash
+nf-test test tests/pipeline.synthetic.nf.test        # or: nf-test test --tag pipeline_synthetic
+```
+
+**Data:** `tests/fixtures/synthetic/` (its `README.md` describes each library): six libraries in the layout the single-cell pipeline writes, one manifest per test, extra files for joins and filters, and a reduced GTF. Text files hold the token `@ROOT@` where an absolute path is needed. `SyntheticTree.materialize` (`tests/lib/SyntheticTree.groovy`) copies the tree to `.nf-test/synthetic_root` and fills in the path. `tests/synthetic.config` mounts that directory into the task containers at the same path, because the artifacts written by `LOCATE_SCRNA_ARTIFACTS` hold absolute paths that the head job reads on the host too.
+
+**To audit a run:** the inputs are in `.nf-test/synthetic_root`; the outputs are in `.nf-test/tests/<test id>/` (`output/` published, `work/` every task directory, `meta/nextflow.log`). nf-test prints the test id. Every test uses `--analysis_id SYN`.
+
+### Test 1 (the main test): apply each manifest entry's donor, filters and join to its own library's cells, and run the donor steps
+
+**Risk:** a filter, donor or join from one manifest entry could be dropped or applied to the wrong library, silently keeping or losing cells.
+
+**Setup** (`manifest_filters.yaml`): two libraries with MapMyCells results (model `MODEL1`, cell type column `MODEL1_class_name`), each with five cells. Each entry has its own donor and filters. A join of `files/extra.tsv` (columns `cell`, `extra_flag`) is set once in `dgeDefaults`, so both entries get it.
+
+| Library | Donor | Filter | Cell removed and why |
+|---|---|---|---|
+| `LIB_MMC_1` | `N1` | `pct_mt` `min` 0.015 | `GGGG` (`pct_mt` 0.01) |
+| | | `pct_mt` `max` 0.4 | `TTTT` (`pct_mt` 0.5) |
+| | | `MODEL1_class_name` `include` Glut, Vip | `CCCC` (class GABA) |
+| `LIB_MMC_2` | `N2` | `cell_barcode` `includeFile` (`AAAA`, `CCCC`, `GGGG`, `ACAC`) | `TTTT` (not listed) |
+| | | `cell_barcode` `excludeFile` (`CCCC`) | `CCCC` |
+| | | `MODEL1_class_name` `exclude` GABA | `GGGG` (class GABA) |
+
+Each filter removes a different cell, so a filter that is not applied changes the result. The six filter types (`min`, `max`, `include`, `exclude`, `includeFile`, `excludeFile`) are each used once.
+
+**Checks after one run** (expected values worked out by hand from the fixtures):
+- The merged cell metadata has exactly four rows: `AAAA` and `ACAC` of `LIB_MMC_1` with donor `N1`, then of `LIB_MMC_2` with donor `N2`. Every row has `extra_flag` `yes` (from the join) and class `Glut`.
+- The matrix has the same four cells (`barcodes.tsv.gz`, in that order) and 8 nonzero entries: a filtered-out cell must not leak into the counts. GENEA is 1, 3, 7, 9 and GENEC is 4, 6, 3, 5 for the four cells; GENEB is zero in all of them.
+- The donor metacells hold the expression summed per donor: `N1` is `LIB_MMC_1` `AAAA` + `ACAC` (GENEA 1 + 3 = 4, GENEC 4 + 6 = 10) and `N2` is `LIB_MMC_2` (GENEA 7 + 9 = 16, GENEC 3 + 5 = 8). The donor by cell type metacells have the same sums under `N1:Glut` and `N2:Glut`.
+- The donor cell type report has two cells per donor, all `Glut`, with median `num_retained_transcripts` 300 (median of 100 and 500) for `N1` and 30 (median of 10 and 50) for `N2`.
+
+### Test 2 (guard): merge two libraries in manifest order, keeping each cell's metadata and counts with its own library
+
+**Risk:** the pipeline merges several libraries into one cell table and one matrix. If it mixed up the libraries, it could pair one library's metadata with another's counts and nothing would fail. The merge must also follow the manifest's order.
+
+**Setup** (`manifest_plain.yaml`): two libraries with no donors and no MapMyCells results, both with a cell `AAAA` that has different data. The manifest lists `LIB_PLAIN_2` first, the reverse of alphabetical order, so sorting by library name would be caught.
+
+| Library | Cells | `num_transcripts` | Counts of `AAAA` (genes A, B, C) |
+|---|---|---|---|
+| `LIB_PLAIN_1` | `AAAA`, `CCCC`, `GGGG` | 100, 200, 300 | 1, 0, 4 |
+| `LIB_PLAIN_2` | `AAAA`, `TTTT` | 50, 80 | 7, 0, 9 |
+
+**Checks after one run:**
+- The merged cell metadata lists `LIB_PLAIN_2` `AAAA`, `LIB_PLAIN_2` `TTTT`, `LIB_PLAIN_1` `AAAA`, `LIB_PLAIN_1` `CCCC`, `LIB_PLAIN_1` `GGGG`, each with its own library's `num_transcripts` (50, 80, 100, 200, 300).
+- The library metrics have one row per library, in the same order.
+- `barcodes.tsv.gz` lists the same five cells as `<library>_<barcode>`, in the same order, and every matrix entry has the right count (the first `AAAA` column holds 7 and 9, which are `LIB_PLAIN_2`'s counts).
+- With no donors and no MapMyCells results, the pipeline logs "have no donors" and "No library has MapMyCells results", and publishes no donor or cell type file. This is the first time the no-MapMyCells path runs through the workflow.
+
+**Not checked:** a different finishing order of the tasks. The test compares manifest order with alphabetical order only.
+
+### Test 3 (guard): fail in MERGE_CELL_METADATA when a library lists the same cell barcode twice
+
+**Risk:** a duplicated cell would silently be counted twice in the merged table.
+
+**Setup** (`manifest_duplicate_cell.yaml`): `LIB_DUP` has `AAAA` twice in its cell metadata.
+
+**Checks:** the run fails, and the failed task is `MERGE_CELL_METADATA` (its log says "Duplicate keys found"), not an earlier step.
+
+### Tests 4 to 7: resolver errors, the cell type level and the MapMyCells model
+
+These run the whole pipeline through the resolver and the cell type step, on `manifest_cell_type_levels.yaml` (`LIB_MMC_1` with donor `N1`, and `LIB_MMC_SUPER` with donor `N3`) and `manifest_mixed_donors.yaml`.
+
+**Test 4 (guard): stop when the libraries have different cell type columns.**
+- *Risk:* the libraries are merged into one table with one cell type column. If two libraries named it differently, the merged column would be wrong or half empty.
+- *Setup:* the cell type column is the top level of each library's MapMyCells hierarchy. `LIB_MMC_1` has `class > subclass`, so its default column is `MODEL1_class_name`. `LIB_MMC_SUPER` has `supercluster > class`, so its default is `MODEL1_supercluster_name`.
+- *Checks:* the run fails with "The libraries have different cell type columns", naming each library and its column, and no donor process runs.
+
+**Test 5: `--mmc_level class` sets the cell type column, report and metacells.**
+- *Risk:* a level given on the command line might not reach `FORMAT_MAPMYCELLS_ANNOTATIONS`, or might reach only some libraries.
+- *Setup:* the same two libraries as test 4, run with `--mmc_level class`. Both now have `MODEL1_class_name`.
+- *Checks:* The merged metadata has 7 cells (5 from `LIB_MMC_1`, 2 from `LIB_MMC_SUPER`), each with the class from its own library's result. The report has one row per donor and class (for example `N1` `Glut`: 3 cells, fraction 0.6, median 300; `N3` `GABA`: 1 cell, fraction 0.5, median 2000), and the metacells have one column per donor and class (`N1:GABA`, `N1:Glut`, `N1:Vip`, `N3:GABA`, `N3:Glut`).
+
+**Test 6 (guard): stop at the resolver when only some libraries have donors.**
+- *Risk:* a matrix with donors for only some libraries would give donor metacells that silently leave out cells.
+- *Setup:* `LIB_MMC_1` has a donor in its manifest entry and `LIB_PLAIN_1` has none.
+- *Checks:* the run fails with "Either all libraries have donors or none do", naming both libraries, before any SUMMARIZE, FORMAT or BUILD task runs.
+
+**Test 7: `--mmc_model MODEL2` selects that model in every library.**
+- *Risk:* by default each library uses its first MapMyCells model. If the override did not reach every library, the cell type columns would mix models.
+- *Setup* (`manifest_mmc_model.yaml`): `LIB_MMC_1` and `LIB_MMC_2` each have two models: `MODEL1` (the first, classes Glut, GABA, Vip) and `MODEL2` (classes Neuron, Glia). The other tests use the default, so they exercise `MODEL1`.
+- *Checks:* the merged metadata has no `MODEL1` column and each cell carries its own library's `MODEL2` class; the report has the exact counts, fractions and medians per donor and class (for example `N2` `Glia`: 2 cells, fraction 0.4, median 35).
+
+**Not covered:** a different finishing order of the tasks (the merge order is the manifest order by construction, so it cannot depend on it) and default filters merged with entry filters through the workflow (Groovy tests only). There is no `--reference` parameter: libraries with different references always fail in the resolver.
 
 ## Live tests (real data compared with the baseline)
 
-Live tests run a module on real data and compare the result with the baseline: the output of the validated prototype shell script
-(`docs/specifications/scrna-aggregation_prototype.sh`) on the same manifest. They are tagged `live`. They exist for the modules that read
-`gs://` (also tagged `gcs`) and for the modules that produce the merged files we publish. Per-library intermediate modules
-(`FORMAT_MAPMYCELLS_ANNOTATIONS`, `BUILD_LIBRARY_CELL_METADATA`) have fixture tests only: their outputs are covered through the merged
-files they feed. The workflow's outputs are checked against the baseline again by the final integration test.
+Live tests run a module on real data and compare the result with the **baseline**: the output of the validated prototype shell script (`docs/specifications/scrna-aggregation_prototype.sh`) on the same manifest. They are tagged `live`. They exist for the modules that read `gs://` (also tagged `gcs`) and for the modules that produce the merged files we publish. The per-library intermediate modules (`FORMAT_MAPMYCELLS_ANNOTATIONS`, `BUILD_LIBRARY_CELL_METADATA`) have fixture tests only: their outputs are covered through the merged files they feed, and by the whole-pipeline live test.
 
-Every live comparison hashes first: the md5 of the generated file's content (decompressed for `.gz`, streamed so large files such as the DGEs are
-cheap) is compared with the baseline file's. Equal md5s pass and print `matches baseline (md5 ...)`; only on a mismatch are the fields or lines
-compared, to print what differs (at most 10 lines). The helper is `tests/lib/LiveFiles.groovy`, loaded by `libDir` in `nf-test.config`.
+Every comparison hashes first: the md5 of the generated file's content (decompressed for `.gz`, streamed so large DGEs are cheap) against the baseline file's. Equal md5s pass and print `matches baseline (md5 ...)`; only on a mismatch are fields or lines compared, to print what differs (at most 10 lines). The helper is `tests/lib/LiveFiles.groovy`, loaded through `libDir` in `nf-test.config`. The live tests read fixed paths in the repo: the manifest `tests/live_data/manifest.yaml` and the baseline `tests/live_data/baseline/` (git-ignored, made by step 1).
 
-The live tests read fixed paths in the repo: the manifest `tests/live_data/manifest.yaml` and the baseline `tests/live_data/baseline/`
-(git-ignored, made by step 1 below).
+**Prerequisites:** Docker, network access, the public `current` Drop-seq images (Docker pulls them), and your Google Cloud Application Default Credentials (`gcloud auth application-default login`, which writes `$HOME/.config/gcloud/application_default_credentials.json`). Step 1 (the shell script) mounts this file into its containers and the tests mount it into theirs (`gcp_credentials_file` parameter). The shell script also copies `gs://` inputs on the host with `gcloud storage cp`, which uses the gcloud CLI's own login (`gcloud auth login`); the tests do not need that.
 
-Prerequisites: Docker, network access, the public `current` Drop-seq images (Docker pulls them), and your Google Cloud Application
-Default Credentials: run `gcloud auth application-default login`, which writes
-`$HOME/.config/gcloud/application_default_credentials.json`. These are your own local Google Cloud credentials, and
-the same file is used by both steps: step 1 (the shell script) mounts it into its containers, and the tests mount it
-into theirs (`gcp_credentials_file` parameter). The shell script additionally copies `gs://` inputs on the host with
-`gcloud storage cp`, which uses the gcloud CLI's own login (`gcloud auth login`), a separate credential that the
-tests do not need.
-### **Step 1: make the baseline**
-With the prototype shell script, using the manifest in the repo
-(`tests/live_data/manifest.yaml`, see `tests/live_data/README.md`). The baseline is the output of the prototype's
-validated serial run of the same steps; the live tests compare the Nextflow modules with it. It goes into
-`tests/live_data/baseline/`, which is git-ignored (nothing generated is committed). Run from the repo root, using the same
-image tag as the modules (`current`; the baseline in use was made with local `jn_test` builds, which behave the same for the live manifest):
+### Step 1: make the baseline
+
+Run the prototype shell script on the manifest in the repo (`tests/live_data/manifest.yaml`, see `tests/live_data/README.md`). The output goes into `tests/live_data/baseline/`, which is git-ignored. Run from the repo root with the same image tag as the modules (`current`; the baseline in use was made with local `jn_test` builds, which behave the same for the live manifest):
 
 ```bash
 docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml \
     --analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current
 ```
 
-It needs the same prerequisites as above plus `gcloud` on the host (it copies `gs://` inputs with
-`gcloud storage cp`) and about 340 MB of scratch space for the reduced GTF (in `tests/live_data/baseline/tmp`). This command was run into `tests/live_data/baseline` and the full
-suite (including the live tests) passes against that baseline.
+It needs the prerequisites above plus `gcloud` on the host, and about 340 MB of scratch space for the reduced GTF (in `tests/live_data/baseline/tmp`).
 
-### **Step 2: run all the tests** 
-With no options (needs the baseline from step 1, the credentials above and the project ID):
+### Step 2: run the tests
+
+Needs the baseline from step 1, the credentials above and the project ID. Export the project ID once:
 
 ```bash
 export GOOGLE_PROJECT_ID=bican-um1-mccarroll
-tests/run_all_tests.sh
 ```
 
-The script stops with a clear message, before starting Docker, if the project ID, credentials file, `nf-test` or baseline is
-missing. The live tests print the generated and baseline file paths and `matches baseline (...)`, or every differing field.
+Then run either:
 
-**What the live tests cover.** One file per module, each with its own tests (`<module>/tests/`); each runs every library in the baseline:
+```bash
+tests/run_all_tests.sh        # everything (104 tests); stops before starting Docker if the project ID, credentials file, nf-test or baseline is missing
+nf-test test --tag live       # only the live tests (11), with no pre-checks
+```
+
+### What the live tests cover
+
+One file per module, each running every library in the baseline:
 
 | Test file | Needs | Runs | Compares with the baseline |
 |---|---|---|---|
-| `locate_scrna_artifacts/tests/gcs.nf.test` | network, ADC | `LOCATE_SCRNA_ARTIFACTS` on the manifest's real `gs://` DGEs | each library's `artifacts/<library>.yaml` (md5, else field by field) |
-| `summarize_scrna_experiments/tests/gcs.nf.test` | network, ADC | `SUMMARIZE_SCRNA_EXPERIMENTS` on every `artifacts/<library>.yaml` | `artifacts/<library>.library_metrics.txt` (md5, else column by column) and `tearsheets/<library>.standard_analysis_tearsheet.txt` (md5, else line by line) |
-| `merge_library_metadata/tests/live.nf.test` (2 tests) | the baseline only | `MERGE_LIBRARY_METADATA` on the per-library metrics, and on the per-library cell metadata with `--index-col PREFIX --index-col cell_barcode` | `<analysis>.library_metrics.txt` and `<analysis>.cell_metadata.txt` (md5, else line by line) |
-| `make_triplet_dge/tests/live.nf.test` | the baseline only | `MAKE_TRIPLET_DGE` on the baseline's local DGE copies (`tmp/<library>/`) and `<library>.joined_filtered_cell_metadata.txt` barcode lists | `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`: decompressed content identical (md5; 104,322 matrix lines for the current baseline) |
-| `make_metacells_from_triplet_dge/tests/live.nf.test` | the baseline only | `MAKE_METACELLS_FROM_TRIPLET_DGE` on the baseline's `matrix.mtx.gz`, `features.tsv.gz`, `barcodes.tsv.gz` and `<analysis>.cell_metadata.txt`, grouped by `donor` and by `donor` + the column in `<analysis>.cell_type_column.txt` | `<analysis>.donors.metacells.txt.gz` and `<analysis>.donor_cell_type.metacells.txt.gz`, without the `#MakeMetacellsFromTripletDge` header line (it holds absolute paths); lines compared only to report a mismatch |
-| `donor_cell_type_report/tests/live.nf.test` | the baseline only | `DONOR_CELL_TYPE_REPORT` on `<analysis>.cell_metadata.txt` with the column named in `<analysis>.cell_type_column.txt` (written by the prototype since 2026-10-16; remake an older baseline) | `<analysis>.donor_cell_type.txt` (md5, else line by line) |
+| `locate_scrna_artifacts/tests/gcs.nf.test` | network, ADC | `LOCATE_SCRNA_ARTIFACTS` on the manifest's real `gs://` DGEs | each `artifacts/<library>.yaml` |
+| `summarize_scrna_experiments/tests/gcs.nf.test` | network, ADC | `SUMMARIZE_SCRNA_EXPERIMENTS` on every `artifacts/<library>.yaml` | `artifacts/<library>.library_metrics.txt` and `tearsheets/<library>.standard_analysis_tearsheet.txt` |
+| `merge_library_metadata/tests/live.nf.test` (2 tests) | baseline | `MERGE_LIBRARY_METADATA` on the per-library metrics, and on the per-library cell metadata with `--index-col PREFIX --index-col cell_barcode` | `<analysis>.library_metrics.txt` and `<analysis>.cell_metadata.txt` |
+| `make_triplet_dge/tests/live.nf.test` | baseline | `MAKE_TRIPLET_DGE` on the baseline's local DGE copies (`tmp/<library>/`) and `<library>.joined_filtered_cell_metadata.txt` barcode lists | `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz` (decompressed content; 104,322 matrix lines for the current baseline) |
+| `make_metacells_from_triplet_dge/tests/live.nf.test` | baseline | `MAKE_METACELLS_FROM_TRIPLET_DGE` on the baseline's matrix, features, barcodes and `<analysis>.cell_metadata.txt`, grouped by `donor` and by `donor` + the column in `<analysis>.cell_type_column.txt` | `<analysis>.donors.metacells.txt.gz` and `<analysis>.donor_cell_type.metacells.txt.gz`, without the `#MakeMetacellsFromTripletDge` header line (it holds absolute paths) |
+| `donor_cell_type_report/tests/live.nf.test` | baseline | `DONOR_CELL_TYPE_REPORT` on `<analysis>.cell_metadata.txt` with the column named in the baseline's `<analysis>.cell_type_column.txt` (written by the prototype since 2026-10-16: remake an older baseline; the pipeline itself no longer publishes this file) | `<analysis>.donor_cell_type.txt` |
 
-The last three need no network or credentials, but they read files that only the baseline has (inputs in `tmp/` and per-library files), so they also need step 1.
+The last four need no network or credentials, but they read files that only the baseline has, so they also need step 1. `run_date` and `run_status` come from the newest Nextflow trace in the bucket, so a newer run of a library makes those two columns differ from an older baseline.
 
-**Not covered by live data yet:** the donor cell type report and the metacells (modules not written yet), and the per-library intermediates above.
-
-**Run one live test by hand** (needs the baseline from step 1): pass one of the files above to `nf-test test`, for example
+To run one live test by hand, pass its file to `nf-test test`, for example:
 
 ```bash
 GOOGLE_PROJECT_ID=bican-um1-mccarroll nf-test test modules/local/summarize_scrna_experiments/tests/gcs.nf.test
 ```
 
-(or any other file in the table). `nf-test test --tag live` runs all of them, `--tag gcs` only the two that read `gs://`. To select one of the two
-MERGE_LIBRARY_METADATA tests, see below. See "Running one file or one test" for selecting tests inside a file.
+### Whole-pipeline live test
 
-`run_date` and `run_status` come from the newest Nextflow trace in the bucket, so a newer run of the library makes those two
-columns differ from an older baseline.
+`tests/pipeline.live.nf.test` (2 tests) runs the whole pipeline once on the live manifest and, only if it succeeded, compares each published file with the baseline (md5 of the decompressed content; mismatching lines are printed).
+- The top level of `--outdir` has exactly the merged results, `artifacts/`, `tearsheets/` and `pipeline_info/`.
+- Every merged result equals the baseline's (the metacell files without their `#MakeMetacellsFromTripletDge` line), as do `artifacts/<uei>.yaml` and `tearsheets/`.
+- The per-library intermediates in the run's work directory (library metrics, joined cell metadata, arguments file, MapMyCells TSV) are correct.
+- `pipeline_info/<analysis>.resolved_libraries.txt` names the right DGE, cell metadata, model, annotations and reduced GTF, and `Donors: yes`.
+- A second test sets `--analysis_id` to the library id and expects the run to stop with the resolver's message before SUMMARIZE, FORMAT or BUILD run.
 
-Notes:
+## Whole pipeline on Google Batch
 
-- A plain `nf-test test` also runs the live tests, which fail without the baseline and `GOOGLE_PROJECT_ID`. Use `tests/run_all_tests.sh`, or select by path
-  (see "Running one file or one test").
-- `nf-test.config` sets the default profile to `docker,test`: tools run in Docker with no extra flag. Fixture tests need no credentials.
-- Test output goes to `.nf-test/`, which is git-ignored.
+`tests/batch_full_run/run.sh` runs the whole pipeline on the live manifest (`tests/live_data/manifest.yaml`, analysis id `SMRI_V11.unfiltered`) with `-profile googlebatch`, and checks the result. It is a script and not an nf-test, because nf-test always passes a local `-work-dir` and Google Batch needs a `gs://` one. It is not part of `tests/run_all_tests.sh`. Background on the identities, projects and network: [credentials.md](credentials.md).
 
-## Running one file or one test
+### Before you run it
 
-`tests/run_all_tests.sh` always runs everything. To run less while developing, use nf-test directly:
+- Application Default Credentials (`gcloud auth application-default login`), `nextflow`, `gsutil`, and the baseline in `tests/live_data/baseline` (see [Live tests](#live-tests-real-data-compared-with-the-baseline), step 1).
+- The project must own the data and be able to write the work bucket. The live data is in `mccarroll-scrna-seq`.
+- Both variables are required by the `googlebatch` profile (an unset one gives a null project, region or network):
 
-| Goal | Command |
-|---|---|
-| one file | `nf-test test modules/local/locate_scrna_artifacts/tests/main.nf.test` |
-| one test | add the ID nf-test prints in brackets: `nf-test test modules/local/locate_scrna_artifacts/tests/main.nf.test@14bbfafa` (the ID comes from the test name, so it changes if the test is renamed) |
-| see what would run | add `--dry-run` to any command: it lists the tests without running them |
+```bash
+export GOOGLE_PROJECT_ID=mccarroll-scrna-seq
+export GOOGLE_LOCATION=us-central1
+```
 
-The live test files (`gcs.nf.test`, `live.nf.test`) need the baseline described under "Live tests".
+### Run it
 
-## Test fixtures
+```bash
+tests/batch_full_run/run.sh [gs://<bucket>/<path>]
+# default base: gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing
+```
 
-Fixtures are tiny and synthetic. The `LOCATE_SCRNA_ARTIFACTS` tests use a fake library tree in
-`modules/local/locate_scrna_artifacts/tests/fixtures/`, mounted at `/fixtures` in the container, so no credentials or
-network are needed. Function tests (pre-flight) generate their files at test time under `outputDir`.
+The script uses `<base>/work` as the work directory and `<base>/out` as `--outdir`. It first deletes `<base>/out` so that stale files cannot pass, then runs Nextflow, downloads `<base>/out` to `testing_batch_full_run/out`, and checks. It leaves `work` and `out` in the bucket (delete them when done). The run takes a few minutes, showing Nextflow's colored progress display (`-ansi-log true`, kept even though the script gives Nextflow no terminal) and then the checks. The script reads nothing from the terminal, so it can also be run in the background (`... &`) from an interactive shell. The `testing_batch_full_run/` directory is git-ignored; it holds the downloaded output, `nextflow.log`, and the trace (with `peak_rss`, written locally by `tests/batch_full_run/trace.config`).
 
-## Test catalog
+### What it checks (each prints PASS or FAIL; the exit status is the number of failures, 1 if the run itself failed, 2 if a prerequisite is missing)
 
-Pre-flight credentials check, `subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/preflight.function.nf.test`
-(tag `preflight`; function tests, fixtures written at test time). The docker profile must be in the profile string
-for any check to run.
+1. Each of the eight merged files equals the baseline (md5 of the decompressed content; the metacell files without their `#MakeMetacellsFromTripletDge` line). `artifacts/` and `tearsheets/` are not compared here (the nf-test live test does that locally).
+2. The top level of `--outdir` is exactly the merged files, `artifacts/`, `tearsheets/` and `pipeline_info/`.
+3. The `WRITE_*` exec processes ran in the head job (`native_id` is `-` in the trace) and every other task was submitted to Google Batch.
+4. Every task is `COMPLETED`, and every Google Batch task ran in a public `quay.io/broadinstitute/drop-seq_python` or `drop-seq_java` image.
 
-| Severity | Test |
-|---|---|
-| Critical | credentials file missing: fails, naming the path and the `gcloud auth application-default login` remedy |
-| Critical | valid `authorized_user` JSON with a project ID passes |
-| High | credentials path is a directory (what Docker creates for a missing mount source): fails |
-| High | not valid JSON (empty file): fails |
-| High | unsupported or missing `type`: fails, naming the type and the accepted ones |
-| High | `authorized_user` missing a required field (`refresh_token`): fails |
-| High | `authorized_user` with no project ID: fails, mentioning `GOOGLE_PROJECT_ID` |
-| Medium | valid `service_account` JSON passes |
-| Medium | `service_account` without a project ID passes (the key carries `project_id`) |
-| Medium | check skipped without the `docker` profile |
-| Medium | `docker` detected among several comma-separated profiles |
-| Medium | `authorized_user` with a project ID passes |
+It then prints one line per task: the requested memory, `peak_rss` and `realtime`, to tune the memory in `conf/modules.config`.
 
-`LOCATE_SCRNA_ARTIFACTS`, `modules/local/locate_scrna_artifacts/tests/` (fixtures described in `tests/fixtures/README.md`):
+### Last result (2026-10-21, `mccarroll-scrna-seq`, `us-central1`, with the exact machine types)
 
-| File | Severity | Test |
-|---|---|---|
-| `main.nf.test` | Critical | one YAML per library in the manifest, named by uei, none lost or duplicated |
-| `main.nf.test` | Critical | two DGEs of one experiment fail with `duplicate uei values` |
-| `main.nf.test` | High | missing optional artifacts (mmc, village, trace, reduced GTF) are `NA`, not dropped; latest trace chosen; mmc keyed by model |
-| `main.nf.test` | High | manifest donor carried into the YAML, `NA` when unset |
-| `main.nf.test` | High | output equals the reviewed expected YAMLs, and every non-`NA` path exists in the fixture tree |
-| `main.nf.test` | Medium | `meta.id` propagates; output is a directory named `artifacts` |
-| `gcs.nf.test` | Critical | live: real `gs://` manifest with the mounted credentials gives correctly named YAMLs with `gs://` paths; prints the YAML paths; must equal the baseline field by field |
+All 12 checks passed (the 8 merged files equal the baseline, the top-level listing, `WRITE_*` in the head job, every task `COMPLETED` in the public images). The log had no Cloud Info deprecation warning and no "cannot be executed by 'google-batch' executor" warning. The Google Batch jobs used `n1-standard-2` for the default processes and `n1-standard-8` for the three Java steps (read back with `gcloud batch jobs describe`). Peak memory was 611 MB for `MAKE_TRIPLET_DGE`, about 130 MB for the metacell steps and under 200 MB for the others (requests: 15 GB for the Java steps, 6 GB for the rest), and each task ran for 2 to 9 seconds.
 
-### SUMMARIZE_SCRNA_EXPERIMENTS (`modules/local/summarize_scrna_experiments/tests/`)
-`main.nf.test` (2 tests, fixtures in `tests/fixtures/`, self-contained: `LIB_FULL.yaml`, `LIB_NA.yaml` and small real files in
-`data/LIB_FULL/`, mounted at `/fixtures`; the tool reads the files the YAML points at, it does not accept missing files):
-1. one metrics row and one tearsheet named for the library, meta (id, analysis_id) propagated, fixed 48-column header,
-   exact values from the fixture files (reads, % mapped, run status/date, chimeric %, doublet %, CBRB median UMIs, tearsheet rows).
-2. every artifact NA: succeeds, every metric NA except library/reference/standard_analysis_dir, tearsheet has only the NA chimeric row.
-`gcs.nf.test` (live; every `artifacts/<library>.yaml` of the baseline is run): each gives metrics identical to `artifacts/<library>.library_metrics.txt`
-(all columns) and a tearsheet identical to `tearsheets/<library>.standard_analysis_tearsheet.txt`.
+### Things that can go wrong
 
-### MERGE_LIBRARY_METADATA (`modules/local/merge_library_metadata/tests/`)
-Contract: `tuple val(meta), path(tsvs)` -> `combined` = `tuple val(meta), path('<ext.prefix ?: meta.id>.txt')`; `ext.args` carries
-`--index-col PREFIX --index-col cell_barcode` for the cell metadata call. Fixtures (self-contained, `tests/fixtures/README.md`):
-`lib_a.tsv`, `lib_b.tsv` (same barcode AAAA as lib_a, other PREFIX), `lib_c_extra_column.tsv`, `lib_a_duplicate_cell.tsv`.
-`main.nf.test` (4 tests; the file-level config sets no `ext.args`, `index.config` sets the index columns for test 4):
-1. two libraries: every row kept, input order, header unchanged, file named `<meta.id>.txt`, meta propagated.
-2. column union: a file lacking a column gets empty values, other values not shifted.
-3. one input passes through with identical content.
-4. with `--index-col`, a duplicate (PREFIX, cell_barcode) fails with the tool's `Duplicate keys found`.
-`live.nf.test` (2 tests, see Live tests): the merged `<analysis>.library_metrics.txt` (`live_library_metrics.config` sets `ext.prefix`) and
-`<analysis>.cell_metadata.txt` (`live_cell_metadata.config` sets `ext.args` and `ext.prefix`, the planned workflow config) equal the baseline files.
-Not implemented (candidates 5-7): `ext.prefix` override, same barcode with different PREFIX accepted under `--index-col`, stub.
-
-### FORMAT_MAPMYCELLS_ANNOTATIONS (`modules/local/format_mapmycells_annotations/tests/`)
-Contract: `tuple val(meta), path(csv)` (meta.id = library id) -> `converted` = `tuple val(meta), path('<ext.prefix ?: meta.id>.mmc.tsv')` and
-`cell_type_column` = `tuple val(meta), val('<prefix><level>_name')` (the module reads the tool's one-line file itself; only the string leaves the task). The cell type column is the `_name` column of the chosen taxonomy level (default: the top level); all levels stay in the TSV.
-`ext.args` carries `--column-prefix <model>_` and optionally `--level`. Fixture (`tests/fixtures/README.md`): `mmc_two_level.csv`
-(3 `#` lines, hierarchy class > subclass, 3 cells). `main.nf.test` (4 tests; `prefix.config`, `subclass.config`, `bad_level.config` set `ext.args` per test):
-1. `#` lines dropped, every column but `cell_id` prefixed, rows in order (the tool rewrites `0.9000` as `0.9`).
-2. default level is the top of the hierarchy: `cell_type_column` is `M_class_name`, present in the header.
-3. `--level subclass` gives `M_subclass_name`.
-4. `--level nope` fails with the tool's `No M_nope_name column`.
-No live test (a per-library intermediate; covered through the merged outputs that the live tests compare). Not implemented (candidates 5-8): meta/name check, no-prefix, `ext.prefix` override, stub.
-
-### BUILD_LIBRARY_CELL_METADATA (`modules/local/build_library_cell_metadata/tests/`)
-Wraps `join_and_filter_tsv`. Contract: `tuple val(meta), path(cell_metadata), path(mmc_tsv), path(args_file), path(extra_files)` (meta.id = library id;
-`mmc_tsv` and `extra_files` are `[]` when absent; `args_file` is always a file) -> `cell_metadata` = `tuple val(meta), path('<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt')`.
-`PREFIX` (= meta.id) is the first column; the MapMyCells TSV is left-joined on `cell_barcode` = `cell_id` before the arguments file (the manifest's donor, joins and
-filters, one argument per line, read with `--args-file`; an empty file for none), so filters can use its columns. Files named in the arguments file go in `extra_files` and are
-named by their basename. There is no `ext.args`: the arguments file is the only source, and as a staged input it stays in the task directory (not published). Fixtures
-(`tests/fixtures/README.md`): `cmd.tsv`, `mmc.tsv`, `extra.tsv`, `args_*.txt`. `main.nf.test` (6 tests):
-1. `PREFIX` first, rows and columns otherwise unchanged, empty arguments file (the tool rewrites numbers: `0.20` -> `0.2`, so fixtures avoid trailing zeros).
-2. MapMyCells left join: a cell without an annotation keeps its row with an empty value.
-3. `--set donor N1`, `--max pct_mt 0.1` and `--exclude M_class_name GABA` (a joined column) from the arguments file applied.
-4. a staged `extra.tsv` named in the arguments file is joined (an absent cell is kept, empty).
-5. an argument with spaces, a dollar sign and a quote is applied exactly as written (one argument, not expanded or split).
-6. no MapMyCells TSV: no MapMyCells columns.
-No live test (a per-library intermediate; covered through the merged outputs that the live tests compare). Not implemented: duplicate join key fails (the tool tests it), meta/name check, `ext.prefix`, stub.
-
-### MAKE_TRIPLET_DGE (`modules/local/make_triplet_dge/tests/`)
-Wraps the Java `MakeTripletDge` (image `quay.io/broadinstitute/drop-seq_java:current`; the heap is 80% of `task.memory`). Contract:
-`tuple val(meta), val(prefixes), path(dges), path(barcode_lists)` plus `path(reduced_gtf)` (the three lists have one element per library, in merge order;
-the task writes the manifest as `manifest.yaml` in its work directory, for debugging, and passes it with `--MANIFEST`; it is not an output) -> `matrix`, `barcodes`, `features` = `tuple val(meta), path('matrix.mtx.gz' | 'barcodes.tsv.gz' | 'features.tsv.gz')`.
-Barcodes are `<prefix>_<barcode>`. The tests use the module's image (`quay.io/broadinstitute/drop-seq_java:current`)
-with a 2 GB `resourceLimits` set in the test `nextflow.config`.
-Fixtures (`tests/fixtures/README.md`): `lib_a.dge.txt`, `lib_b.dge.txt`, `lib_a.cells.tsv`, `lib_b.cells.tsv`, `reduced.gtf`. `main.nf.test` (4 tests):
-1. two libraries: prefixed barcodes in library order, the expected 7 matrix entries, fixed output names, meta propagated.
-2. the barcode list filters cells (a cell in the DGE but not in the list is absent, its counts are not in the matrix).
-3. features are `gene_id`, `gene_name`, `Gene Expression` in matrix row order, and the matrix header agrees with the features and barcodes.
-4. the same prefix and barcode twice fails with the tool's `Output CBCs are not unique`.
-`live.nf.test` (see Live tests): the sparse DGE equals the baseline's. Not implemented: a single library, `meta`/names alone, stub.
-
-### DONOR_CELL_TYPE_REPORT (`modules/local/donor_cell_type_report/tests/`)
-Wraps `donor_cell_type_report` (python image). Contract: `tuple val(meta), path(cell_metadata), val(cell_type_column)` (`meta.id` = analysis id; the
-column name is FORMAT_MAPMYCELLS_ANNOTATIONS's `cell_type_column` value) -> `report` = `tuple val(meta), path('<ext.prefix ?: meta.id>.donor_cell_type.txt')`.
-`ext.args` may set `--donor-column` / `--umi-column` (defaults `donor`, `num_retained_transcripts`). The workflow decides whether to call it (donor column and
-cell type column present). Fixtures (`tests/fixtures/README.md`, expected values worked out there): `cell_metadata.tsv`,
-`cell_metadata_missing_donor_or_cell_type.tsv`. `main.nf.test` (3 tests):
-1. exact rows (counts, fractions rounded to 3 places, medians including an even-count median) in first-appearance order; meta and name.
-2. cells with no donor are ignored; cells with no cell type count toward the donor's total only; a donor with only untyped cells has no row.
-3. a cell type column not in the cell metadata fails with the tool's `No [...] column(s)`.
-`live.nf.test` (see Live tests): the report on the baseline's `<analysis>.cell_metadata.txt` equals `<analysis>.donor_cell_type.txt`.
-Not implemented: numeric-looking donor ids kept as text, `ext.args --umi-column`, stub.
-
-### MAKE_METACELLS_FROM_TRIPLET_DGE (`modules/local/make_metacells_from_triplet_dge/tests/`)
-Wraps `MakeMetacellsFromTripletDge` (private java image). Contract: `tuple val(meta), path(matrix), path(features), path(barcodes), path(cell_metadata),
-val(group_columns)` (`meta.id` = analysis id; `group_columns` a list of column names of the merged cell metadata) -> `metacells` = `tuple val(meta),
-path('<ext.prefix ?: meta.id>.metacells.txt.gz')`. The workflow includes it twice (donor; donor + cell type column) with `ext.prefix` `<analysis>.donors` /
-`<analysis>.donor_cell_type`. The tool joins the cells as `<PREFIX>_<cell_barcode>` itself (defaults), and needs absolute paths (the module uses `$PWD`).
-`ext.args` is free for extra tool arguments. Fixtures (`tests/fixtures/README.md`, expected sums worked out there): `matrix.mtx.gz`, `features.tsv.gz`,
-`barcodes.tsv.gz`, `cell_metadata.tsv`. `main.nf.test` (5 tests):
-1. donor sums, with the join by PREFIX and cell_barcode; meta and name.
-2. donor and cell type sums, metacells named `donor:cell_type`.
-3. cells with no metadata row or an empty donor are in no metacell.
-4. the same barcode in two libraries stays separate, each with its own donor.
-5. an unknown group column fails, with the column named in the tool's message.
-`live.nf.test` (see Live tests): both outputs equal the baseline's, ignoring the header line.
-Not implemented: `ext.prefix`, stub, row order of the output.
-
-### Manifest parsing (`subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/manifest.function.nf.test`)
-`lib/AggregationManifest.groovy` (pure Groovy; Nextflow loads `lib/` when the pipeline runs, and `nf-test.config` has `libDir = "tests/lib:lib"` so the tests call
-the class directly) parses and validates the manifest YAML. `loadAggregationManifest(String path)` in the utils `main.nf` is the thin wrapper that reads the
-file and turns errors into `error(...)`; it hosts the tests (each runs it once on `tests/live_data/manifest.yaml`). Contract: `parse(String yamlText)` returns one
-map per DGE in manifest order, `[dge, donor, filters, joins]`, with `dgeDefaults` projected onto each entry; invalid manifests throw
-`IllegalArgumentException` naming the DGE entry. Rules follow the original Zamboni workflow (`ScRnaAggregationManifestKey`, `YamlManifestUtil.projectDefaults`):
-- Projection is deep (recursive): missing keys are copied, dictionaries merge key by key with the entry winning, default lists (joins) are used only
-  when the entry has none. (The Python `resolve_aggregation_manifest` projects shallowly and also allows `donor` in `dgeDefaults` and the list form of
-  `filters`; it goes away with the wiring.)
-- Strict keys at every level (top level: `dges`, `dgeDefaults`; `dgeDefaults`: `filters`, `joins`; entry: `dge`, `donor`, `filters`, `joins`; no `libraryId`).
-- `filters` is a dictionary keyed by column only; `min`/`max` numbers; `include`/`exclude` a value or a list (kept as parsed YAML scalars); `joins` a list or one
-  dictionary with all of `joinFile`, `leftColumn`, `joinColumn`; duplicate YAML keys and duplicate DGEs are errors; no value may contain a line break (each
-  argument is one line of the arguments file of `join_and_filter_tsv --args-file`).
-Fixtures: `tests/fixtures/README.md` (a copy of the original workflow's own example manifest; the rest is inline YAML or the live manifests). 12 tests:
-default projection (3: copy, merge per column and key, joins not appended), filter normalization, list form rejected, join order, join keys required,
-structure/type errors (a table of 23 cases), duplicate DGEs, line breaks (9 cases), live manifests, the original's example manifest.
-Not implemented: the wrapper's own tests (missing file message), `dges` as a single dictionary, scalar types preserved beyond the cases above.
-
-### join_and_filter_tsv arguments (`subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/arguments.function.nf.test`)
-`lib/JoinFilterArguments.groovy` (pure Groovy, tests call it directly; hosted on the `loadAggregationManifest` wrapper like the manifest tests).
-`JoinFilterArguments.build(entry)` takes one entry of `AggregationManifest.parse` and returns `[args, files]`: the arguments of `join_and_filter_tsv` for the donor,
-joins and filters, and the original paths of the files to stage (each once, in order of use). The arguments have the order and text of dropseq's
-`resolve_aggregation_manifest.join_and_filter_args` (the expected list in test 1 is that function's output for the same filters and joins), with `--set donor`
-first (as `resolve()` does) and file paths replaced by their staged base names; values use `toString` (Python wrote `True` where Groovy writes `true`; the tool reads
-either; a small float may be `1.0E-4`). Empty `include`/`exclude` lists are skipped. Two different paths with one base name in an entry, or a path with no file name,
-throw `IllegalArgumentException`; `loadAggregationManifest` calls the builder per entry so this fails at load, before any process.
-`toArgsFileText(args)` is the arguments file: one argument per line (an empty file for none). 7 tests: the order against the Python resolver, empty entry / donor only /
-empty lists, staging once with local and gs:// names, base name collisions, number/boolean/donor formatting, the file text, the collision reported at load.
-Checked by hand (2026-10-16, rebuilt python image; not an automated test): the builder's arguments file for an entry with a donor, a join, `exclude`, `max`, `includeFile` and an
-`include` with a space and a leading `@`, run through `join_and_filter_tsv --args-file`, gave output identical to the same arguments on the command line; an empty file works.
-The BUILD module tests will cover it in the suite.
-
-### Library resolver (`subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/resolver.function.nf.test`, `resolver.live.nf.test`)
-`lib/LibraryResolver.groovy` replaces `resolve_aggregation_manifest` (data flow: `docs/data_flow.md`). `loadArtifact(yamlText)` parses one artifact file (one dataset with a `uei`
-and a `user_dge`); `resolve(entries, artifacts, analysisId, [reference, mmcModel])` matches each manifest entry to the artifact whose `user_dge` equals its `dge` and returns
-`[analysisId, libraries: id -> [libraryId, dge, cellMetadata, mmcModel, mmcAnnotations, args, files] in manifest order, reducedGtf, reference]`; `summaryText(result)` is the plain text of
-`<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` (for people, never parsed back). Rules: the library's DGE is the one the manifest names, of any type; the MapMyCells model is the override, else the library's first model (annotations
-`NA` if it has none, which gates the conversion); the references (or the alignment directory names) and the reduced GTFs must agree unless a reference is given; ids unique and not the
-analysis id; the donor comes from the manifest entry. New checks (not in the Python): the same `user_dge` in two artifacts; libraries with MapMyCells results of different models;
-a staged file named like the cell metadata, `<lib>.mmc.tsv`, `<lib>.join_and_filter_args.txt` or `<lib>.joined_filtered_cell_metadata.txt`. Artifacts in the tests are built from the
-fields the resolver reads (`fixtures/artifact_lib_a.yaml` is a real artifact file). 11 tests: records in manifest order (extra artifacts ignored; the DGE is the one the manifest names, even a selected-cells DGE of a library that also has a donor DGE), MapMyCells model choice, mixed models,
-no artifact / no user_dge / duplicate user_dge, id rules, reference / GTF / missing metadata, staged name collisions, the artifact reader, the plain-text summary (a full expected text, and a library with no arguments or files),
-`checkCellTypeColumn` (same column passes, none gives null, different columns fail naming the libraries).
-`resolver.live.nf.test` (see Live tests): resolving `tests/live_data/manifest.yaml` with the baseline's `artifacts/*.yaml` gives the same library, DGE, cell metadata, model, annotations and
-reduced GTF as `resolved_manifest/libraries.tsv`, and the same arguments text as its args file.
-Not implemented: a test that the donor from the manifest is used for a village DGE too (not enforced, as in the Python), and the stub-free cases of `loadArtifact` beyond those listed.
-
-### Pipeline (`tests/pipeline.validation.nf.test`, `tests/pipeline.live.nf.test`)
-`conf/test.config` (profile `test`, used by every nf-test run) supplies `--manifest tests/live_data/manifest.yaml` and `--analysis_id SMRI_V11.unfiltered`. The pipeline needs
-`--manifest`, `--analysis_id` and `--outdir` (schema: `analysis_id` has only letters, digits, `.`, `_`, `-`). `pipeline.validation.nf.test` (4 tests, no process starts):
-no manifest, no analysis id, an analysis id with a slash, and a manifest with an unknown key (the message names the file, `dge entry 1` and the key).
-`pipeline.live.nf.test` runs the whole pipeline ONCE on the live manifest and, only if it succeeded, compares each published file with the baseline (md5 of the
-decompressed content; mismatching lines are printed). Each wired edge adds its comparisons. Published files: the merged results are flat in `--outdir`, per-library `artifacts/` and `tearsheets/`, and `pipeline_info/`; the test checks that the top level has exactly these entries. Compared with the baseline: every merged result (`<analysis>.library_metrics.txt`, `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.cell_type_column.txt`, `<analysis>.donor_cell_type.txt`, and the two metacell files without their `#MakeMetacellsFromTripletDge` line), `artifacts/<uei>.yaml`, and `tearsheets/`. The per-library intermediates are found in the run's work directory: `<lib>.library_metrics.txt` (its row is for the library), `<lib>.joined_filtered_cell_metadata.txt` (equal to the baseline's, `PREFIX` is the library id), `<lib>.join_and_filter_args.txt` (equal to the baseline's, which is empty for the live manifest) and `<lib>.mmc.tsv`. The reduced GTF is staged from `gs://` (340 MB), and `tests/nextflow.config` sets the local private Java image and a 4 GB memory cap for nf-test runs. The library resolver: its plain-text `pipeline_info/<analysis>.resolved_libraries.txt` names, per library, the baseline `libraries.tsv`'s dge, cell_metadata, mmc_model, mmc_annotations and reduced_gtf, no arguments, and `Donors: yes`; a second live test sets `--analysis_id` to the library id and expects the run to stop with the resolver's message before SUMMARIZE, FORMAT or BUILD run. The template smoke test (`tests/default.nf.test`) and the samplesheet (`assets/samplesheet.csv`, `schema_input.json`) were removed.
+- `Missing Google project Id`: `GOOGLE_PROJECT_ID` is not exported. (Earlier, an nf-core institutional `googlebatch` profile overrode ours; the institutional configs are no longer loaded.)
+- `CODE_GCE_RESOURCE_NOT_FOUND ... networks/default`: the profile sets the `broad-allow` network from `GOOGLE_PROJECT_ID`; check that the project has it.
+- `Permission denied` or `403` on a bucket: the project in `GOOGLE_PROJECT_ID` cannot reach that bucket (see credentials.md, "The project must have access to the bucket where the data lives").

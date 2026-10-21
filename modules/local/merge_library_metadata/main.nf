@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 process MERGE_LIBRARY_METADATA {
     tag "$meta.id"
     label 'process_single'
@@ -8,11 +10,17 @@ process MERGE_LIBRARY_METADATA {
     input:
     // meta.id is the analysis id. tsvs: one or more headered TSVs, concatenated in the order given
     // (the workflow sorts them by library id for a stable order).
-    tuple val(meta), path(tsvs)
+    record(
+        meta: Map,
+        tsvs: List<Path>
+    )
 
     output:
     // one file: union of the input columns, rows of all inputs; named <ext.prefix or meta.id>.txt
-    tuple val(meta), path("${task.ext.prefix ?: meta.id}.txt"), emit: combined
+    combined = record(
+        meta: meta,
+        combined: file("${task.ext.prefix ?: meta.id}.txt")
+    )
 
     script:
     def args = task.ext.args ?: ''
@@ -21,7 +29,7 @@ process MERGE_LIBRARY_METADATA {
     cat_tsvs \\
         --output ${prefix}.txt \\
         ${args} \\
-        ${tsvs}
+        ${tsvs.join(' ')}
     """
 
     stub:

@@ -1,6 +1,6 @@
 // Live check: can a Google Batch task read a gs:// object with the VM's default service account (no credentials mounted)?
 // Reads the size and the first 1 KiB of one object (--gcs_object), so a large FASTQ is not downloaded.
-// Not an nf-test: nf-test always passes a local -work-dir and Batch needs a gs:// one. Run from the repository root:
+// Not an nf-test: nf-test always passes a local -work-dir and Google Batch needs a gs:// one. Run from the repository root:
 //   export GOOGLE_PROJECT_ID=bican-um1-mccarroll GOOGLE_LOCATION=us-central1
 //   nextflow run tests/batch_access_check -c tests/batch_access_check/nextflow.config \
 //     -work-dir gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work \

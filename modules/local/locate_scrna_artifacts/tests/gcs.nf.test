@@ -20,13 +20,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'live_analysis' ], file('${projectDir}/tests/live_data/manifest.yaml') ]
+                input[0] = record(meta: [ id:'live_analysis' ], manifest: file('${projectDir}/tests/live_data/manifest.yaml'))
                 """
             }
         }
 
         then {
-            def dir = file(process.out.artifacts_dir[0][1])
+            def dir = file(process.out.artifacts_dir[0].artifacts)
             def yamls = dir.listFiles().findAll { it.name.endsWith('.yaml') }
             def datasets = yamls.collect { new org.yaml.snakeyaml.Yaml().load(it.text).datasets[0] }
             // show where the generated artifact YAMLs are, for inspection after the run

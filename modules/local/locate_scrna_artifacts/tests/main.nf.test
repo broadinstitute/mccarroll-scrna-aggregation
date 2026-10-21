@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "locate_scrna_artifacts"
 
-    // Contract: tuple val(meta), path(manifest) -> tuple val(meta), path('artifacts') emitted as artifacts_dir.
+    // Contract: record(meta: Map, manifest: Path) -> artifacts_dir: record(meta: Map, artifacts: Path 'artifacts', a directory).
     // The 'artifacts' directory holds one <uei>.yaml per manifest DGE, each with a 'datasets' list of length 1.
     // Fixtures (tests/fixtures) are a synthetic local tree mounted at /fixtures:
     //   LIB_A: complete (village V1, mmc MODEL1, two pipeline traces, reference with reduced GTF)
@@ -20,13 +20,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
 
         then {
-            def dir = file(process.out.artifacts_dir[0][1])
+            def dir = file(process.out.artifacts_dir[0].artifacts)
             def yamls = dir.listFiles().findAll { it.name.endsWith('.yaml') }.sort { it.name }
             def datasets = yamls.collect { new org.yaml.snakeyaml.Yaml().load(it.text).datasets }
             assertAll(
@@ -44,7 +44,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_duplicate_uei.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_duplicate_uei.yaml"))
                 """
             }
         }
@@ -65,13 +65,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
 
         then {
-            def dir = file(process.out.artifacts_dir[0][1])
+            def dir = file(process.out.artifacts_dir[0].artifacts)
             def a = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_A.yaml').text).datasets[0]
             def b = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_B.yaml').text).datasets[0]
             assertAll(
@@ -94,13 +94,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
 
         then {
-            def dir = file(process.out.artifacts_dir[0][1])
+            def dir = file(process.out.artifacts_dir[0].artifacts)
             def a = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_A.yaml').text).datasets[0]
             def b = new org.yaml.snakeyaml.Yaml().load(new File(dir.toString(), 'LIB_B.yaml').text).datasets[0]
             assertAll(
@@ -116,7 +116,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
@@ -126,9 +126,9 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.artifacts_dir.size() == 1 },
-                { assert emitted[0].id == 'test_analysis' },
-                { assert file(emitted[1]).isDirectory() },
-                { assert file(emitted[1]).name == 'artifacts' }
+                { assert emitted.meta.id == 'test_analysis' },
+                { assert file(emitted.artifacts).isDirectory() },
+                { assert file(emitted.artifacts).name == 'artifacts' }
             )
         }
     }
@@ -138,13 +138,13 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'test_analysis' ], file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml") ]
+                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
 
         then {
-            def dir = file(process.out.artifacts_dir[0][1])
+            def dir = file(process.out.artifacts_dir[0].artifacts)
             // flatten nested maps (mmc) to dotted keys
             def flatten
             flatten = { Map m, String prefix = '' ->

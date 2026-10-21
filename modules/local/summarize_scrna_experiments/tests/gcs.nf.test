@@ -29,8 +29,8 @@ nextflow_process {
             assert new File(root, 'artifacts').isDirectory() : "no baseline in ${root} (see docs/testing.md, Live tests)"
             def libs = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.collect { it.name - '.yaml' }.sort()
             assert libs : "no <library>.yaml in ${root}/artifacts"
-            // one channel item per library: [ meta, artifacts yaml ]
-            def items = libs.collect { "[ [ id:'${it}', analysis_id:'live_analysis' ], file('${root}/artifacts/${it}.yaml') ]" }.join(', ')
+            // one channel item per library: record(meta, artifacts_yaml)
+            def items = libs.collect { "record(meta: [ id:'${it}', analysis_id:'live_analysis' ], artifacts_yaml: file('${root}/artifacts/${it}.yaml'))" }.join(', ')
             process {
                 """
                 input[0] = channel.of(${items})
@@ -46,8 +46,8 @@ nextflow_process {
                 [header, lines.drop(1).collect { l -> l.split('\t', -1) as List }]
             }
             // emits arrive in no fixed order: pair metrics and tearsheet by library id
-            def metricsByLib = process.out.metrics.collectEntries { meta, f -> [(meta.id): file(f)] }
-            def tearsheetByLib = process.out.tearsheet.collectEntries { meta, f -> [(meta.id): file(f)] }
+            def metricsByLib = process.out.summary.collectEntries { r -> [(r.meta.id): file(r.metrics)] }
+            def tearsheetByLib = process.out.summary.collectEntries { r -> [(r.meta.id): file(r.tearsheet)] }
             def libs = new File(root, 'artifacts').listFiles().findAll { it.name.endsWith('.yaml') }.collect { it.name - '.yaml' }.sort()
 
             def failures = []

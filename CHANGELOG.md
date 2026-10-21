@@ -9,7 +9,7 @@ Initial release of mccarroll/scrna-aggregation, created with the [nf-core](https
 
 ### `Added`
 
-- Manifest-driven aggregation: `--manifest`, `--analysis_id`, `--reference`, `--mmc_model`, `--mmc_level`; library resolver in the workflow with a plain-text `pipeline_info/<analysis>.resolved_libraries.txt`; per-library summaries, merged metrics, MapMyCells formatting and cell metadata building.
+- Manifest-driven aggregation: `--manifest`, `--analysis_id`, `--mmc_model`, `--mmc_level`; library resolver in the workflow with a plain-text `pipeline_info/<analysis>.resolved_libraries.txt`; per-library summaries, merged metrics, MapMyCells formatting and cell metadata building.
 
 ### `Fixed`
 

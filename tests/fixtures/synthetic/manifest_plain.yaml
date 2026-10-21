@@ -1,0 +1,4 @@
+# no donors, no MapMyCells results, no filters; the order is the reverse of the alphabetical order of the library ids
+dges:
+  - dge: @ROOT@/LIB_PLAIN_2/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_PLAIN_2.selected.digital_expression.txt.gz
+  - dge: @ROOT@/LIB_PLAIN_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_PLAIN_1.selected.digital_expression.txt.gz

@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 process FORMAT_MAPMYCELLS_ANNOTATIONS {
     tag "$meta.id"
     label 'process_single'
@@ -7,15 +9,22 @@ process FORMAT_MAPMYCELLS_ANNOTATIONS {
 
     input:
     // meta.id is the library id. csv: MapMyCells result csv with '#' header lines and a cell_id column.
-    tuple val(meta), path(csv)
+    record(
+        meta: Map,
+        csv: Path
+    )
 
     output:
-    // tab-separated, no '#' lines; every column except cell_id is prefixed (ext.args --column-prefix)
-    tuple val(meta), path("${task.ext.prefix ?: meta.id}.mmc.tsv"), emit: converted
-    // Name of the cell type column, <prefix><level>_name: the name column of the chosen taxonomy level (default: the top level,
-    // known only from the csv's '# taxonomy hierarchy' line). Read from the tool's one-line file; only the string leaves the task.
-    // All levels stay in the TSV; later steps group by this column.
-    tuple val(meta), eval("cat cell_type_column.txt"), emit: cell_type_column
+    // one record per library:
+    //   converted: tab-separated, no '#' lines; every column except cell_id is prefixed (ext.args --column-prefix)
+    //   cell_type_column: name of the cell type column, <prefix><level>_name: the name column of the chosen taxonomy level (default: the top
+    //     level, known only from the csv's '# taxonomy hierarchy' line). Read from the tool's one-line file; only the string leaves the task.
+    //     All levels stay in the TSV; later steps group by this column.
+    annotations = record(
+        meta: meta,
+        converted: file("${task.ext.prefix ?: meta.id}.mmc.tsv"),
+        cell_type_column: eval("cat cell_type_column.txt")
+    )
 
     script:
     def args = task.ext.args ?: ''

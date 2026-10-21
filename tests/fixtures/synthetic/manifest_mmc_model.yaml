@@ -1,0 +1,6 @@
+# two libraries with two MapMyCells models each (MODEL1 is the first); run with --mmc_model MODEL2
+dges:
+  - dge: @ROOT@/LIB_MMC_1/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_1.selected.digital_expression.txt.gz
+    donor: N1
+  - dge: @ROOT@/LIB_MMC_2/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_MMC_2.selected.digital_expression.txt.gz
+    donor: N2

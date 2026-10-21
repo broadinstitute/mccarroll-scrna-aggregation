@@ -36,14 +36,14 @@ nextflow_process {
             def inputs = baselineLibraries(root).collect { "file('${root}/artifacts/${it}.library_metrics.txt')" }.join(', ')
             process {
                 """
-                input[0] = [ [ id:'${baselineAnalysis(root)}' ], [ ${inputs} ] ]
+                input[0] = record(meta: [ id:'${baselineAnalysis(root)}' ], tsvs: [ ${inputs} ])
                 """
             }
         }
 
         then {
             def root = new File("${projectDir}/tests/live_data/baseline".toString())
-            def generated = file(process.out.combined[0][1])
+            def generated = file(process.out.combined[0].combined)
             def baseline = new File(root, "${baselineAnalysis(root)}.library_metrics.txt")
             def generatedMd5 = LiveFiles.contentMd5(generated)
             def same = generatedMd5 == LiveFiles.contentMd5(baseline)
@@ -75,14 +75,14 @@ nextflow_process {
             def inputs = baselineLibraries(root).collect { "file('${root}/${it}.joined_filtered_cell_metadata.txt')" }.join(', ')
             process {
                 """
-                input[0] = [ [ id:'${baselineAnalysis(root)}' ], [ ${inputs} ] ]
+                input[0] = record(meta: [ id:'${baselineAnalysis(root)}' ], tsvs: [ ${inputs} ])
                 """
             }
         }
 
         then {
             def root = new File("${projectDir}/tests/live_data/baseline".toString())
-            def generated = file(process.out.combined[0][1])
+            def generated = file(process.out.combined[0].combined)
             def baseline = new File(root, "${baselineAnalysis(root)}.cell_metadata.txt")
             def generatedMd5 = LiveFiles.contentMd5(generated)
             def same = generatedMd5 == LiveFiles.contentMd5(baseline)

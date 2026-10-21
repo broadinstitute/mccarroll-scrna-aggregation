@@ -12,7 +12,7 @@ nextflow_function {
     //   loadArtifact(String yamlText): the artifact file of one library (written by LOCATE_SCRNA_ARTIFACTS) as a map, checked to have one dataset
     //     with a uei and a user_dge.
     //   resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options): entries from AggregationManifest.parse, artifacts from
-    //     loadArtifact, options [reference: String|null, mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
+    //     loadArtifact, options [mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
     //     reducedGtf, reference, analysisId, hasDonors]; a record is [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
     //     The DGE of a library is the one the manifest names (the artifact's user_dge), whatever its type. A library has donors if its manifest entry
     //     names a donor or its artifacts have a village (village_properties); hasDonors is true if all have, and a mix is an error.
@@ -231,7 +231,6 @@ nextflow_function {
             def otherGtf = artifact('LIB_B', [reduced_gtf: '/ref/OTHER.reduced.gtf'])
             def noReference = { String uei -> artifact(uei, [reference: 'NA', alignment_dir: '/data/some/REF_DIR/']) }
             def mixedReferences = failure { resolve(entriesFor([a, otherReference]), [a, otherReference]) }
-            def overridden = resolve(entriesFor([a, otherReference]), [a, otherReference], 'analysis1', [reference: 'GIVEN'])
             // with no reference in the artifacts it is the name of the alignment directory
             def fallback = resolve(entriesFor([noReference('LIB_A'), noReference('LIB_B')]), [noReference('LIB_A'), noReference('LIB_B')])
             def mixedGtf = failure { resolve(entriesFor([a, otherGtf]), [a, otherGtf]) }
@@ -242,7 +241,6 @@ nextflow_function {
             assertAll(
                 { assert function.success },
                 { assert mixedReferences != null && mixedReferences.toLowerCase().contains('reference') && mixedReferences.contains('OTHER') },
-                { assert overridden.reference == 'GIVEN' && overridden.libraries.size() == 2 },
                 { assert fallback.reference == 'REF_DIR' },
                 { assert mixedGtf != null && mixedGtf.toLowerCase().contains('gtf') && mixedGtf.contains('OTHER.reduced.gtf') },
                 { assert missingGtf != null && missingGtf.toLowerCase().contains('gtf') && missingGtf.contains('LIB_B') },
@@ -426,6 +424,37 @@ nextflow_function {
                 { assert mixed != null && mixed.contains('LIB_A') && mixed.contains('LIB_B') && mixed.contains('Without') },
                 { assert mixedManifest != null && mixedManifest.contains('LIB_A') && mixedManifest.contains('LIB_B') },
                 { assert LibraryResolver.summaryText(noDonors).readLines()[3] == 'Donors:      no' }
+            )
+        }
+    }
+
+    test("Should check the cell type column from two parallel lists as it does from a map, and reject lists that do not pair up") {
+
+
+        when {
+            function {
+                """
+                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                """
+            }
+        }
+
+        then {
+            def same = LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_neighborhood_name', 'M_neighborhood_name'])
+            def none = LibraryResolver.checkCellTypeColumn([], [])
+            def message = failure { LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_class_name', 'M_neighborhood_name']) }
+            def unpaired = failure { LibraryResolver.checkCellTypeColumn(['LIB_A', 'LIB_B'], ['M_class_name']) }
+            assertAll(
+                { assert function.success },
+                { assert same == 'M_neighborhood_name' },
+                // no library has results: no column, no error
+                { assert none == null },
+                // the same message as the map form: it names both libraries and both columns
+                { assert message != null },
+                { assert message.contains('LIB_A') && message.contains('LIB_B') },
+                { assert message.contains('M_class_name') && message.contains('M_neighborhood_name') },
+                // a library without its column (or the reverse) is an error, not a silently shorter map
+                { assert unpaired != null && unpaired.contains('pair up') }
             )
         }
     }

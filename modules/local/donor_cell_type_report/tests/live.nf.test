@@ -35,14 +35,14 @@ nextflow_process {
             def column = baselineCellTypeColumn(root, analysis)
             process {
                 """
-                input[0] = [ [ id:'${analysis}' ], file('${root}/${analysis}.cell_metadata.txt'), '${column}' ]
+                input[0] = record(meta: [ id:'${analysis}' ], cell_metadata: file('${root}/${analysis}.cell_metadata.txt'), cell_type_column: '${column}')
                 """
             }
         }
 
         then {
             def root = new File("${projectDir}/tests/live_data/baseline".toString())
-            def generated = file(process.out.report[0][1])
+            def generated = file(process.out.report[0].report)
             def baseline = new File(root, "${baselineAnalysis(root)}.donor_cell_type.txt")
             def generatedMd5 = LiveFiles.contentMd5(generated)
             def same = generatedMd5 == LiveFiles.contentMd5(baseline)

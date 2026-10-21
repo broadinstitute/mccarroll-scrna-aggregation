@@ -1,12 +1,16 @@
 # TODO / status
 
-Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; docs updated, no pipeline code changed). Branch `jn_initial_module_work`. Sessions 4 to 7 are committed (6 commits after `ab0f491`, not pushed). Commit only when the user asks.
+Last updated: 2026-10-21 (session 10: first full run on Google Batch, Google Batch profile work, cell type column file removed). Branch `jn_google_cloud_analysis`. Sessions 4 to 10 are committed (session 10 in 4 commits); nothing is pushed and no pull request is open. Commit only when the user asks.
+
+**State at the end of session 10:** everything is verified after the last code change. `tests/run_all_tests.sh`: 104 tests, 752 s, all passed. `tests/batch_full_run/run.sh` on Google Batch (`mccarroll-scrna-seq`): 12 of 12 checks passed with the exact machine types (`n1-standard-2` default, `n1-standard-8` for the Java steps), no Cloud Info warning, no `WRITE_*` executor warning. `nextflow lint .` is clean (50 files). Scratch from that run is still in `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/{work,out}` (delete when done).
+
+**NEXT (handoff): the Python command line tool that launches this workflow on Seqera Platform ("tower").** Copy the structure of `https://github.com/broadinstitute/mccarroll_tw_clp/blob/main/src/clp/launch_sn_rna.py` (check out that repository first): look up the project in `gs://mccarroll_scrnaseq_standard/metadata/project/project_metadata.yaml` (`tower_workspace`, `standard_bucket`), build the `outdir` as `gs://<standard_bucket>/projects/<project>/<run name>`, write a params YAML (manifest, `analysis_id`, `outdir`) and call `tw launch --workspace=... <pipeline> --params-file=... --name=...`. The work directory comes from the workspace's compute environment (it is not set in the pipeline). Open questions for the user and coworkers: whether the project metadata gets an aggregation entry, how the pipeline is registered in Seqera, and a first Seqera run (Fusion and Wave are on in the compute environments, the plain `nextflow run` path used neither). Follow the process in section 5 (questions, data contract, candidate tests, stop for the user's selection). Other open items: tune the Java step memory (now 15 GB, then 30 GB) with larger data sets (section D), and the unselected tests (section F).
 
 ## 1. Where we are
 
-- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 92 tests in about 10 minutes with no failures at the end of session 6
+- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 104 tests with no failures at the end of session 10 (752 s)
   (needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`).
-  `nextflow lint .` has no errors and 7 old warnings (the template's `Channel.topic`, the unused `ch_collated_versions`, a few implicit closure parameters).
+  `nextflow lint .` is clean (50 files, no errors or warnings).
 - **What the pipeline does** (`main.nf` -> `workflows/scrna-aggregation.nf`; data-flow diagram in `../data_flow.md`):
   `PIPELINE_INITIALISATION` checks credentials and the manifest -> `LOCATE_SCRNA_ARTIFACTS` -> `LibraryResolver.resolve` (head job, Groovy) -> per library
   `SUMMARIZE_SCRNA_EXPERIMENTS`, `FORMAT_MAPMYCELLS_ANNOTATIONS` (only with MapMyCells results), `BUILD_LIBRARY_CELL_METADATA` -> merged `MERGE_LIBRARY_METRICS`,
@@ -18,66 +22,59 @@ Last updated: 2026-10-19 (end of session 7: Google Batch access tested, see D; d
 ## 2. Follow-up TODO (roughly in priority order)
 
 ### A. Commit the work (done in session 7)
-Committed in 6 groups (old resolver modules removed, modules, workflow/config/resolver, tests, Batch checks, docs). Not pushed. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories before the next commit.
+Committed in 6 groups (old resolver modules removed, modules, workflow/config/resolver, tests, Google Batch checks, docs). Not pushed. `work/`, `.nf-test/` and `tests/live_data/baseline` are git-ignored; check `git status` for stray `testing*` directories before the next commit.
 
-### B. Nextflow language: strict syntax and static typing (NEW, user request)
-The user wants the pipeline to use the current Nextflow language (strict syntax) and potentially static typing.
-- **Verified (session 6, Seqera blog https://seqera.io/blog/nextflow-26-10-what's-new/):** static typing is STABLE and production-ready in 26.10, but still OPT-IN per script via `nextflow.enable.types`
-  (not the default; existing code runs unchanged, adopt gradually). `nextflow lint` reports type errors; `nextflow run` also checks types but only warns. Recommended: run `nextflow lint` in CI before `nextflow run`.
-  The `migrate-nextflow-code` skill (nextflow-io/agent-skills) also handles strict syntax, topic channels and replacing `publishDir` with the `output` block. Docs: docs.seqera.io/nextflow/static-typing.
-  The blog never says "V2"; per the user, DSL2 (called "V2") has been the default for years, so the pipeline already is DSL2; the remaining language work is strict syntax (`nextflow lint` clean) and optional typing. Tutorial:
-https://docs.seqera.io/nextflow/tutorials/static-types (checked at the end of session 6; Nextflow here is 26.10.0).
-- **What that page says** (consistent with the blog above: typing is optional, not the default, and
-  that existing code keeps working): each script that uses typed features sets `nextflow.enable.types = true`; pipeline parameters go in a typed `params { ... }` block;
-  `record` types replace `tuple` (`record Sample { id: String, ... }`), processes get typed inputs (`record(id: String, fastq_1: Path)`, `Path`, `Bag<Path>` for several staged
-  files) and typed outputs (`record(id: id, quant: file("..."))`, `file()` / `files()` instead of `path`), `take:` / `emit:` of workflows are typed (`samples: Channel<X> = ch`);
-  every process a workflow calls must be migrated before the workflow; `fromFilePairs()` does not work with types; type errors are reported by `nextflow lint` and the language
-  server; there is a `migrate-nextflow-code` agent skill.
-- **State of this repo:** no `nextflow.enable.types` anywhere; legacy `params.x` access in `main.nf` and the workflow; tuples with `val(meta)` maps everywhere; the nf-core template
-  subworkflows under `subworkflows/nf-core/` and `utils_nfcore_scrna-aggregation_pipeline` use the old style; `nextflow.config` has `nextflow.enable.configProcessNamesValidation`.
-- **To do:** (1) fix everything `nextflow lint` reports under strict syntax; consider `publishDir` -> `output` block (the blog says the migration skill does it; our explicit publishing in `conf/modules.config` would move); the first cheap step is the 7 existing warnings
-  (`Channel.topic` -> `channel.topic`, remove the unused `ch_collated_versions`, explicit closure parameters in `workflows/scrna-aggregation.nf` and the modules); (2) a typed `params`
-  block (use `nextflow_schema.json` as the reference; params: `manifest`, `analysis_id`, `reference`, `mmc_model`, `mmc_level`, `outdir`, `gcp_credentials_file`, boilerplate); (3) decide
-  whether to go further to static typing: records for the per-library item (today `tuple val(meta_lib), val(record)`, where `record` is a Groovy map from `LibraryResolver`; a `record`
-  type with `libraryId`, `position`, `dge`, `cellMetadata`, `mmcModel`, `mmcAnnotations`, `args: List<String>`, `files: List<String>` fits) and typed process inputs / outputs, migrating
-  the leaves first (the 9 modules), then the workflow; (4) check the nf-core template pieces still compile with types (`utils_nfcore_*`); (5) keep every nf-test green after each step
-  (module tests call processes with tuple inputs: they change with the types); (6) record the decision and the nf-test impact in `../development.md`.
+### B. Nextflow language: strict syntax and static typing (DONE in session 8, committed `b56efab`)
+- Every script has `nextflow.enable.types = true` (Nextflow 26.10.0): `main.nf` (typed `params` block, types only; defaults in `conf/params.config`, included by `nextflow.config`), the init subworkflow (`Manifest` record),
+  `workflows/scrna-aggregation.nf` (`Library` record, record joins by `id`, typed helper `toLibraries`) and the 8 modules (record inputs, named record outputs). Module tests use `record(...)` inputs.
+- `collectFile` is replaced by the `exec` process `WRITE_TEXT_FILE` (3 aliases: resolved summary, args file, versions; the cell type column file was removed in session 10). `topic: versions` is gone; `WRITE_VERSIONS` writes the versions file.
+- `help` decision: `String?` with default `null`; a bare `--help` prints the general help (intercepted in `PIPELINE_INITIALISATION`); `--help <name>` describes one parameter. 2 tests.
+- New tests: 2 `WRITE_TEXT_FILE`, 1 `checkCellTypeColumn` two-list overload, 2 help. Suite: 97 tests, all passed. Details and rules learned: `../development.md` (Static typing).
+- Behaviour changes to remember: the cell type column file and resolved summary are published by the `output` block (rewritten on re-runs) instead of `collectFile(storeDir:)`; undeclared params fail early.
+- **Publishing migrated to the `output` block (session 8):** `publishDir` is gone from `conf/modules.config`. `SCRNA_AGGREGATION` has typed emits (13 channels of paths: `Value<Path>` or `Channel<Path>`), `MCCARROLL_SCRNA_AGGREGATION` passes them on, the entry workflow lists them under `publish:` and `main.nf` has the `output { }` block; `outputDir = params.outdir` and `workflow.output.mode = params.publish_dir_mode` are in `nextflow.config`. Same published files as before (live test unchanged). To check on Google Batch: publishing to a `gs://` `--outdir`.
 
-### C. Workflow-level tests that the live data cannot give (user: "we're going to want tests on filtering that the shell script data can't reproduce anyway")
-All of these are tested today only at Groovy level (`resolver.function.nf.test`, `arguments.function.nf.test`), not through the workflow:
-- **Several libraries** (the biggest gap): the i-th prefix, DGE and barcode list belong to the same library; the metadata row order equals the barcode order; the merge order is manifest
-  order (`meta_lib.position`) whatever order the tasks finish in; `MERGE_CELL_METADATA` fails on a duplicate `(PREFIX, cell_barcode)`.
-- **No donors**, **mixed donors** (resolver error, covered in Groovy only), **no MapMyCells results** (report and donor by cell type metacells skipped with a warning), **disagreeing cell
-  type columns**, **non-empty join / filter arguments** (donor, `includeFile`, `excludeFile`, `min`, `max`, `joins`) through BUILD, `--mmc_model`, `--mmc_level`, `--reference` overrides.
-- **How:** a stubbed workflow test is NOT possible as things are (LOCATE's stub makes an empty `artifacts/` directory, so the resolver fails). Options: (a) a small synthetic multi-library
-  dataset on LOCAL paths (LOCATE accepts local paths; its module tests already use local fixtures), real processes on tiny data (user-approved direction, "B for now"); (b) a second real
-  library on `gs://` for a two-library live manifest (also covers edges 3 to 6). `tests/live_data/manifest_no_donors.yaml` (selected-cells DGE, no donors) has never been run; no
-  prototype baseline exists for it.
+### C. Workflow-level tests that the live data cannot give (started in session 9)
+**Done (session 9):** `tests/pipeline.synthetic.nf.test`, 7 tests on local synthetic libraries (`tests/fixtures/synthetic/`, real processes in Docker, no credentials, network or baseline; documented in `../testing.md`):
+1. (main test) a manifest with two MapMyCells libraries and donors: `min`, `max`, `include`, `exclude`, `includeFile`, `excludeFile`, `donor` and a join (from `dgeDefaults`) reach `BUILD_LIBRARY_CELL_METADATA` and the merged cell metadata, the matrix, the donor metacells (summed per donor and per donor and cell type) and the donor cell type report, with expected values worked out by hand.
+2. (guard) two libraries with no donors and no MapMyCells results (the no-MapMyCells path, `mmc_tsv = null`, ran through the workflow for the first time): cells, counts and prefix stay with their own library, in manifest order (the reverse of alphabetical), the skip warnings are logged and no donor files are published.
+3. (guard) a duplicate (`PREFIX`, `cell_barcode`) fails `MERGE_CELL_METADATA`.
+4. (guard) libraries with different cell type columns (`LIB_MMC_SUPER` has the hierarchy supercluster > class) stop the run with the resolver's message.
+5. `--mmc_level class` on the same libraries: cell type column, merged metadata, donor cell type report and metacells use `MODEL1_class_name`.
+6. (guard) mixed donors (one library with a donor, one without) stop at the resolver before any per-library process.
+7. `--mmc_model MODEL2` (a second MapMyCells model in `LIB_MMC_1` and `LIB_MMC_2`) selects that model in every library.
+
+**Decided not to do (user, session 9):** merge order independent of task finish order (the order is the manifest order by construction), `dgeDefaults` beyond one join, a village library through the workflow, running `manifest_no_donors.yaml`, a second real library on `gs://`.
+**Parameter `--reference` removed (user decision, session 9):** libraries with different references always fail in the resolver ("All DGEs must have the same reference"); the override did not change any output. Removed from `main.nf`, `conf/params.config`, `nextflow_schema.json`, the workflow, `LibraryResolver` and the docs (`docs/specifications/scrna-aggregation_prototype.sh` and `SPEC_SUMMARY.md` still describe the prototype's own `--reference`).
+**Section C is complete.**
 - Process reminder: ask clarification questions, state the data contract, list severity-ranked candidate tests, STOP for the user's selection (see Ground rules).
 
-### D. Google Cloud / Batch (session 7 tested the basics; the full pipeline has NOT yet run on Batch)
+### D. Google Batch
+- **Session 10 (2026-10-21): the full pipeline ran on Google Batch (committed).** `tests/batch_full_run/run.sh` (live manifest, `-profile googlebatch`, `gs://` work and out under `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/`): 13 of 13 checks passed on the first run (baseline equality, top-level listing, `WRITE_*` in the head job, all tasks COMPLETED in the public images). Peaks: `MAKE_TRIPLET_DGE` 514 MB, others under 200 MB, tasks 2 to 7 s: the 16 GB / 6 GB requests are far above need (decide whether to lower them with a multi-library run; the retry setup already matches `mccarroll_nextflow`).
+  Changes: `googlebatch` profile sets the `broad-allow` network, subnetwork, tag and exact `machineType`s (a wildcard like `n1-*` still triggers the deprecated Cloud Info selection and its warning; see `../credentials.md`, Machine types; Java steps now 15 GB then 30 GB, 6 cpus fixed); the nf-core institutional configs are no longer loaded (their `googlebatch` profile overrode ours; `custom_config_*` params removed); `gcp_credentials_file` defaults to null (docker profile and pre-flight use the ADC path then). Seqera: the compute environment sets work dir, location, VPC, tag, Wave and Fusion and no service account (so default Compute account); untested with this pipeline. Re-run after the exact types: no Cloud Info warning.
+- **Seqera Platform (user decision, session 10):** deferred until the rest of the analysis is settled. The plan is to check out the command line repository (`broadinstitute/mccarroll_tw_clp`, `src/clp/launch_sn_rna.py` is the model) and write a new Python launcher for the aggregation: it would look up the project in `gs://mccarroll_scrnaseq_standard/metadata/project/project_metadata.yaml` (`tower_workspace`, `standard_bucket`) and call `tw launch`. The work directory comes from the workspace's compute environment. Whether the project metadata gets an aggregation entry is to be discussed with the coworkers.
+- (Below: session 7 notes; "next steps" 1 and 3 are done in session 10, see above.)
 - **Settled in session 7 (details and commands in `../credentials.md`):**
-  - Batch tasks run as the VM's service account. With no `google.batch.serviceAccountEmail`, that is the project's default Compute Engine account. Nextflow itself (on the laptop) uses the user's ADC.
+  - Google Batch tasks run as the VM's service account. With no `google.batch.serviceAccountEmail`, that is the project's default Compute Engine account. Nextflow itself (on the laptop) uses the user's ADC.
   - **No service account setup is needed when the job runs in the project that owns the data.** Passed: `mccarroll-scrna-seq` (`LOCATE_SCRNA_ARTIFACTS` on the live manifest, output identical to the baseline YAML, work dir `gs://mccarroll_scrnaseq_central_temp/...`) and
     `bican-um1-mccarroll` (read of one 8.4 GiB BICAN FASTQ in `bican-um1-mccarroll_standard`, work dir `bican-um1-mccarroll_temp`). Failed (expected): `bican-um1-mccarroll` jobs writing the scranseq work bucket (cross-project, `Permission denied`).
   - **The project is passed at run time** with `GOOGLE_PROJECT_ID` (and `GOOGLE_LOCATION`, `-work-dir gs://...`). User decisions: keep the environment variable (no `--gcp_project` parameter), and NO pre-flight check, only documentation that the project must have access to the root bucket where the data lives.
-  - `bican-um1-mccarroll` has no `default` VPC: Batch failed with `CODE_GCE_RESOURCE_NOT_FOUND`; the fix is `google.batch.network = 'global/networks/broad-allow'` and `google.batch.subnetwork = 'regions/us-central1/subnetworks/broad-allow'` (also exists in `mccarroll-scrna-seq`, which also has `default`).
+  - `bican-um1-mccarroll` has no `default` VPC: Google Batch failed with `CODE_GCE_RESOURCE_NOT_FOUND`; the fix is `google.batch.network = 'global/networks/broad-allow'` and `google.batch.subnetwork = 'regions/us-central1/subnetworks/broad-allow'` (also exists in `mccarroll-scrna-seq`, which also has `default`).
   - The `drop-seq_python` image has no `python3` on the PATH; its Python is `/usr/local/dropseq/venv/dropseq/bin/python`.
-  - nf-test cannot run on Batch (it always passes a local `-work-dir`, and a second `-w` is rejected), so the Batch checks are plain `nextflow run` scripts: `tests/batch_access_check/` (generic object read) and `modules/local/locate_scrna_artifacts/tests/gcs_batch_check.nf` + `gcs_batch.config`.
+  - nf-test cannot run on Google Batch (it always passes a local `-work-dir`, and a second `-w` is rejected), so the Google Batch checks are plain `nextflow run` scripts: `tests/batch_access_check/` (generic object read) and `modules/local/locate_scrna_artifacts/tests/gcs_batch_check.nf` + `gcs_batch.config`.
     Both are untracked and uncommitted. Note `gcs_batch_check.nf` sits next to `tests/nextflow.config`, which Nextflow auto-loads (a fixtures mount); `gcs_batch.config` clears `process.containerOptions` for that reason.
-- **Next steps for Batch (none started):**
+- **Next steps for Google Batch (none started):**
   1. Add the `broad-allow` network settings to the `googlebatch` profile in `nextflow.config` (currently only in the two check configs; `mccarroll-scrna-seq` works with either network). Decide the default project is NOT hardcoded.
   2. Decide the work bucket for real runs (`mccarroll_nextflow_test` in `mccarroll-scrna-seq` looks intended, but its IAM lists only a Seqera user; the tests used `mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/...`).
   3. Run the whole pipeline once with `-profile googlebatch` (needs the work dir, `--outdir`, and a decision on `gs://` vs local `--outdir`) and tune memory (below).
   4. Optional: a dedicated, narrower service account (`google.batch.serviceAccountEmail`); the Broad ones use long-lived JSON keys that should become short-lived tokens, and are over-privileged (Khalid Shakir). Seqera Cloud runs use the compute environment's service account (untested).
   5. A single run that mixes BICAN and scranseq libraries would need a cross-project grant (`roles/storage.objectViewer` for the VM service account on the other project's buckets).
 - Scratch files from the checks can be deleted: `gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/nf-test-batch-work/` and `gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work/`.
-- **Memory:** `MAKE_TRIPLET_DGE`, `DONOR_METACELLS` and `DONOR_CELL_TYPE_METACELLS` are set to `memory = { 16.GB * task.attempt }` in `conf/modules.config` (JVM heap = 80% of `task.memory`,
+- **Memory:** `MAKE_TRIPLET_DGE`, `DONOR_METACELLS` and `DONOR_CELL_TYPE_METACELLS` are set to `cpus = 6` and `memory = { 15.GB * task.attempt }` (session 10; was 16 GB) in `conf/modules.config` (JVM heap = 80% of `task.memory`,
   the user's starting guess; "not an especially memory hungry process"). The label is still `process_medium` (nf-core template: 6 CPUs, 8 h); only memory is overridden. The single
-  live library peaked at 625 MB resident memory for `MAKE_TRIPLET_DGE`, so tune with real multi-library sizes on Batch. There is no retry strategy (`errorStrategy`) yet.
-- Check on Batch: the public images pull (`quay.io/broadinstitute/drop-seq_python:current`, `quay.io/broadinstitute/drop-seq_java:current`; `docker.registry = 'quay.io'` only prefixes names
-  without a host); `gs://` reads of the artifact directory, cell metadata, MapMyCells csv and the 340 MB reduced GTF in the head job and in tasks; `collectFile` of the args files and
-  `storeDir`/`publishDir` with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
+  live library peaked at 625 MB resident memory for `MAKE_TRIPLET_DGE`, so tune with real multi-library sizes on Google Batch. There is no retry strategy (`errorStrategy`) yet.
+- Check on Google Batch: the public images pull (`quay.io/broadinstitute/drop-seq_python:current`, `quay.io/broadinstitute/drop-seq_java:current`; `docker.registry = 'quay.io'` only prefixes names
+  without a host); `gs://` reads of the artifact directory, cell metadata, MapMyCells csv and the 340 MB reduced GTF in the head job and in tasks; `the `exec` process `WRITE_TEXT_FILE` (it must run in the head job: confirm that no `WRITE_*` task is submitted as a Google Batch job) and
+  the `output` block with a `gs://` `--outdir`; a real service-account key (same mount mechanism, untried); whether the Google client falls back to a key's `project_id` when
   `GOOGLE_CLOUD_PROJECT` is empty (untested); `process.resourceLimits` in `conf/test.config` (15 GB) vs the tasks.
 - To test another image tag later (a branch build, with Seqera Platform or a config): `process { withName: 'X' { container = '...' } }`. The tags are hard coded in each module (`current`).
 
@@ -89,7 +86,7 @@ All of these are tested today only at Groovy level (`resolver.function.nf.test`,
 ### F. Unselected candidate tests (add when touching the unit)
 LOCATE / SUMMARIZE: malformed YAML, newest-trace selection, stub. MERGE_LIBRARY_METADATA: ext.prefix, same barcode with different PREFIX, stub. FORMAT: meta / name, no prefix, ext.prefix, stub.
 BUILD: duplicate join key, meta / name, ext.prefix, stub. MAKE_TRIPLET_DGE: single library, meta / names, stub. DONOR_CELL_TYPE_REPORT: numeric-looking donor ids kept as text, `ext.args --umi-column`, stub.
-Workflow: the `--mmc_model` / `--reference` / `--mmc_level` overrides reaching the process; entry args and files reaching BUILD; stub wiring run. Module names: the user was offered a review of the
+Workflow: entry args and files reaching BUILD; stub wiring run. Module names: the user was offered a review of the
 remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 
 ### G. Housekeeping
@@ -98,8 +95,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
   builds; the pipeline (public `current` images) reproduces it exactly for the live manifest. Remake the baseline with the public images when convenient (command in `../testing.md`).
 - **Template leftovers:** `conf/test_full.config` duplicates `conf/test.config` (same manifest); `.github/` still has the nf-core template files; `tower.yml`; `modules.json` lists nf-core
   pieces only; the README has no workflow figure; `CHANGELOG.md` has one entry.
-- **`versions`:** user decision: the hard-coded `current` image tags are the version record, no per-module version collection. The template's `softwareVersionsToYAML` / `Channel.topic("versions")`
-  block in the workflow still writes `pipeline_info/scrna-aggregation_software_versions.yml`; check what it contains (probably only Nextflow and the pipeline) and simplify it (see B).
+- **`versions`:** user decision: the hard-coded `current` image tags are the version record, no per-module version collection. `WRITE_VERSIONS` writes `pipeline_info/scrna-aggregation_software_versions.yml` from `workflowVersionToYAML()` (Nextflow and the pipeline only).
 - **Docs:** `../output.md`, `../usage.md`, `../data_flow.md`, `../testing.md`, `../development.md`, `../credentials.md` were updated in session 6; `docs/README.md` is the index. The `README.md` is a
   short manual-written version; add a workflow figure if wanted.
 
@@ -111,31 +107,30 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 - **Library resolution (`lib/LibraryResolver.groovy`, head job, no process):** the library id is the artifact `uei`; an entry is matched to its artifact by `entry.dge == artifact.user_dge`. The library's
   DGE is the one the MANIFEST names, of any type (NOT donors-else-selected-cells as in the Python `resolve_aggregation_manifest`); the DGE may hold more barcodes than the cell metadata, the metadata selects
   the cells later. Cell metadata is the one the finder chose (the village's if there is a village). A resolver error stops the run (`Cannot resolve the libraries of <analysis>: <reason>`). Checks: unique ids
-  that differ from the analysis id, one reference (or `--reference`), one reduced GTF, MapMyCells results of one model (or `--mmc_model`), same cell type column in every library, all libraries have
+  that differ from the analysis id, one reference, one reduced GTF, MapMyCells results of one model (or `--mmc_model`), same cell type column in every library, all libraries have
   donors or none. The old `RESOLVE_LIBRARIES` process (TSV round trip) and `RESOLVE_AGGREGATION_MANIFEST` module were deleted.
 - **Donors are known upfront, not from file headers:** a library has donors if its manifest entry has a `donor` or its artifacts have a village (`village_properties != NA`); `hasDonors` is true for the run
   if all do. Donor steps are gated on that, the cell type steps on the presence of a cell type column; a skipped step logs a warning.
 - **Order:** libraries are merged in MANIFEST order (`position` in the record and in `meta_lib`); the merged metrics, the merged cell metadata and the triplet DGE are all made from ONE sorted list.
-- **Per library item:** `tuple val(meta_lib), val(record)`; `meta_lib = [id, analysis_id, mmc_model, position]`; `record = [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations ('NA' for none), args: List, files: List]`.
-- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with `collectFile` (work directory only) and BUILD reads it with
+- **Per library item (typed since session 8):** the `Library` record in `workflows/scrna-aggregation.nf`: `id`, `meta` (`[id, analysis_id, mmc_model, position]`), `dge`, `cell_metadata`, `mmc_annotations` ('NA' for none), `args: List<String>`, `files: List<String>`. `LibraryResolver` still returns Groovy maps (`libraryId`, `position`, `hasDonor`, ...); `toLibraries` converts them.
+- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with the `WRITE_ARGS_FILE` exec process (work directory only) and BUILD reads it with
   `join_and_filter_tsv --args-file` (python repo branch `jn_modify_aggregation_python_tools`, public main #589). No `ext.args` for BUILD.
 - **Summary for people:** `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`, plain text (reference, reduced GTF, donors, per library the DGE, cell metadata, MapMyCells, extra files and arguments); nothing reads it back.
-- **Publishing (explicit, `conf/modules.config`; nothing is published unless listed; skipped when `--outdir` is null, as in module tests):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
-  `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.cell_type_column.txt` (written by the workflow with `collectFile(storeDir: params.outdir)`),
-  `<analysis>.donor_cell_type.txt`, `<analysis>.donors.metacells.txt.gz`, `<analysis>.donor_cell_type.metacells.txt.gz`); per-library records in directories (`artifacts/<uei>.yaml`,
+- **Publishing (explicit: the `output` block and `publish:` in `main.nf`; nothing is published unless listed; module tests run one process and publish nothing):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
+  `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.donor_cell_type.txt`, `<analysis>.donors.metacells.txt.gz`, `<analysis>.donor_cell_type.metacells.txt.gz`); per-library records in directories (`artifacts/<uei>.yaml`,
   `tearsheets/<uei>.standard_analysis_tearsheet.txt`); `pipeline_info/`. Per-library library metrics, joined cell metadata, MapMyCells TSV and args files stay in the work directory.
 - **Containers:** hard coded in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (both public; both checked to contain every tool and option the
   modules use). No image parameters. nf-test runs cap memory at 4 GB in `tests/nextflow.config`.
 - **Reduced GTF:** staged from `gs://` (340 MB) in the live test; no override parameter was added.
-- **Parameters:** `--manifest`, `--analysis_id` (letters, digits, `.`, `_`, `-`), `--outdir`, `--reference`, `--mmc_model`, `--mmc_level`, `--gcp_credentials_file`.
-- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
+- **Parameters:** `--manifest`, `--analysis_id` (letters, digits, `.`, `_`, `-`), `--outdir`, `--mmc_model`, `--mmc_level`, `--gcp_credentials_file`.
+- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), `tests/pipeline.synthetic.nf.test` (3 workflow tests on synthetic local libraries), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
   exact top-level listing of `--outdir`, per-library intermediates in the work directory, every task in a public `current` image; and a resolver error stopping the run) and `tests/pipeline.validation.nf.test`.
 
 ## 4. Gotchas learned (move to `../development.md` if they keep mattering)
 - `combine` flattens list items: wrap a list in a list (`ch.map { [it] }`) or it spreads into separate elements.
-- `collectFile` with empty text still creates an (empty) file; `splitCsv` takes a `"` at the START of a field as a quote (not in the middle).
-- `join` on maps (`meta`) works by equality, but key by `meta.id` when the maps come from different places. `toSortedList` returns ONE list of tuples (not flattened).
-- A `publishDir` path of `null` fails every task: module tests run without `--outdir` (fixed with `enabled: params.outdir != null`). Run the MODULE tests after changing `conf/modules.config`.
+- (Old, `collectFile` is gone: `WRITE_TEXT_FILE` also creates an empty file for empty text.) `splitCsv` takes a `"` at the START of a field as a quote (not in the middle).
+- `join` on maps (`meta`) works by equality, but key by `meta.id` when the maps come from different places. `toSortedList` returns ONE list of tuples (not flattened); the typed workflow uses `collect()` + `toSorted`. More typing gotchas: `../development.md` (Static typing).
+- (Old: a null `publishDir` path failed every task. The `output` block has no such problem.) `path 'x'` in the `output` block nests: a file that is already `tearsheets/<f>` needs `path '.'`. A `Value` emit is typed `Value<Path>`, a queue channel `Channel<Path>`.
 - A process script block cannot read a staged path (use a head-job `map` or pass text); `error()` inside an operator closure stops the run with that message.
 - nf-test gives each run `output/` and `work/` side by side; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
 - macOS: `sed -i ''`, no `zcat` (use `gzip -dc`), Docker cannot see the Claude scratchpad (`/private/tmp/...`), `git rm` refuses files with local modifications.
@@ -167,7 +162,7 @@ remaining names (e.g. `LOCATE_SCRNA_ARTIFACTS`) and has not answered.
 ## 7. Run the tests
 ```bash
 export GOOGLE_PROJECT_ID=bican-um1-mccarroll
-tests/run_all_tests.sh                                   # everything, 92 tests, about 10 minutes (needs the baseline, see ../testing.md)
+tests/run_all_tests.sh                                   # everything, 104 tests, about 12 minutes (needs the baseline, see ../testing.md)
 nf-test test modules/local/<module>/tests/main.nf.test   # one file; --tag live runs all the live tests
 nf-test test tests/pipeline.live.nf.test                 # the whole pipeline once vs the baseline, about a minute
 ```

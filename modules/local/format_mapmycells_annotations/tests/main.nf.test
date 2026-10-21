@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "format_mapmycells_annotations"
 
-    // Contract: tuple val(meta), path(csv) -> converted: tuple val(meta), path('<ext.prefix ?: meta.id>.mmc.tsv'),
-    //           cell_type_column: tuple val(meta), val('<prefix><level>_name').
+    // Contract: record(meta: Map, csv: Path) -> annotations: record(meta: Map, converted: Path '<ext.prefix ?: meta.id>.mmc.tsv',
+    //           cell_type_column: String '<prefix><level>_name').
     // The file-level config sets no ext.args; tests needing --column-prefix/--level name a test-level config.
     // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
 
@@ -22,19 +22,19 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                input[0] = record(meta: [ id:'LIB_A' ], csv: file("${moduleDir}/tests/fixtures/mmc_two_level.csv"))
                 """
             }
         }
 
         then {
-            def lines = tsvLines(process.out.converted[0][1])
+            def lines = tsvLines(process.out.annotations[0].converted)
             assertAll(
                 { assert process.success },
-                { assert process.out.converted.size() == 1 },
+                { assert process.out.annotations.size() == 1 },
                 // meta propagated; name from meta.id
-                { assert process.out.converted[0][0] == [ id:'LIB_A' ] },
-                { assert file(process.out.converted[0][1]).name == 'LIB_A.mmc.tsv' },
+                { assert process.out.annotations[0].meta == [ id:'LIB_A' ] },
+                { assert file(process.out.annotations[0].converted).name == 'LIB_A.mmc.tsv' },
                 // no '#' lines; header + 3 rows; cell_id unprefixed, all others prefixed
                 { assert lines.size() == 4 },
                 { assert lines[0] == ['cell_id', 'M_class_label', 'M_class_name', 'M_class_bootstrapping_probability',
@@ -54,7 +54,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                input[0] = record(meta: [ id:'LIB_A' ], csv: file("${moduleDir}/tests/fixtures/mmc_two_level.csv"))
                 """
             }
         }
@@ -62,11 +62,11 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert process.out.cell_type_column.size() == 1 },
-                { assert process.out.cell_type_column[0][0] == [ id:'LIB_A' ] },
-                { assert process.out.cell_type_column[0][1] == 'M_class_name' },
+                { assert process.out.annotations.size() == 1 },
+                { assert process.out.annotations[0].meta == [ id:'LIB_A' ] },
+                { assert process.out.annotations[0].cell_type_column == 'M_class_name' },
                 // the named column exists in the TSV header
-                { assert tsvLines(process.out.converted[0][1])[0].contains('M_class_name') }
+                { assert tsvLines(process.out.annotations[0].converted)[0].contains('M_class_name') }
             )
         }
     }
@@ -78,7 +78,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                input[0] = record(meta: [ id:'LIB_A' ], csv: file("${moduleDir}/tests/fixtures/mmc_two_level.csv"))
                 """
             }
         }
@@ -86,8 +86,8 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.success },
-                { assert process.out.cell_type_column[0][1] == 'M_subclass_name' },
-                { assert tsvLines(process.out.converted[0][1])[0].contains('M_subclass_name') }
+                { assert process.out.annotations[0].cell_type_column == 'M_subclass_name' },
+                { assert tsvLines(process.out.annotations[0].converted)[0].contains('M_subclass_name') }
             )
         }
     }
@@ -99,7 +99,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = [ [ id:'LIB_A' ], file("${moduleDir}/tests/fixtures/mmc_two_level.csv") ]
+                input[0] = record(meta: [ id:'LIB_A' ], csv: file("${moduleDir}/tests/fixtures/mmc_two_level.csv"))
                 """
             }
         }
@@ -107,7 +107,7 @@ nextflow_process {
         then {
             assertAll(
                 { assert process.failed },
-                { assert process.out.converted.isEmpty() },
+                { assert process.out.annotations.isEmpty() },
                 // the tool names the missing column
                 { assert (process.stdout + process.stderr).join('\n').contains('No M_nope_name column') }
             )

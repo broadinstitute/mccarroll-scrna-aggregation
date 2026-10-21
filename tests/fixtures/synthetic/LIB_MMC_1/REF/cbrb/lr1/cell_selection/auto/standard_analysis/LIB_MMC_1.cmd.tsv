@@ -1,0 +1,6 @@
+cell_barcode	num_retained_transcripts	pct_mt	doublet
+AAAA	100	0.05	singlet
+CCCC	200	0.25	singlet
+GGGG	300	0.01	singlet
+TTTT	400	0.5	singlet
+ACAC	500	0.1	singlet
