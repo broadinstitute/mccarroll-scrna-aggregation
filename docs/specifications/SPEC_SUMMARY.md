@@ -1,7 +1,7 @@
 # scRNA aggregation: spec summary (derived from the prototype)
 
 Source of truth: `scrna-aggregation_prototype.sh` (outputs validated). Behavior below is read from it; nothing is invented.
-Companion files: `TODO_STATUS.md` (progress, decisions, how to run).
+Companion files: `TODO.md` (what is left), `DONE.md` (what is done), `../development.md` (decisions, gotchas, how to run).
 
 ## Purpose
 Aggregate several single-library Nextflow scRNA pipeline outputs (selected by a YAML manifest of DGE URLs) into one
@@ -67,13 +67,13 @@ The original validated run, kept for reference and never modified, is in `/Users
 - Prototype uses absolute host paths inside files (triplet manifest, artifacts yaml); in Nextflow the manifest must be
   generated inside the task from staged files (basenames).
 - `libraries.tsv` and args files are produced at runtime -> parse with splitCsv(sep:'\t', header:true) after the
-  resolve step; the per-library filter/join arguments will be built by the workflow from the manifest and passed as `ext.args` (see TODO_STATUS Done 0c); older idea of reading the args file in the script is superseded.
+  resolve step; the per-library filter/join arguments will be built by the workflow from the manifest and passed as `ext.args` (see ../development.md); older idea of reading the args file in the script is superseded.
 - Optional MMC (value `NA`) -> per-library conditional; cell-type column is a runtime value (file content) that
   gates steps 7 and 9; donor presence is a runtime check of the header gating 7-9.
 - Prototype gather steps need meta.id and stable ordering (cat_tsvs output order follows input order; sort by library).
 - No `zcat` on macOS for .gz: use `gzip -dc` when inspecting fixtures locally.
 
-## Module for each prototype step (status in TODO_STATUS.md)
+## Module for each prototype step (status in DONE.md)
 | Step | Module |
 |---|---|
 | 1a | LOCATE_SCRNA_ARTIFACTS |

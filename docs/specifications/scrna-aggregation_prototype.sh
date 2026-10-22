@@ -24,7 +24,7 @@
 # Serial prototype of the scRNA aggregation workflow for Nextflow single cell pipeline outputs.  It reproduces the
 # steps of ScRnaAggregationWorkflow (Zamboni), using locate_scRNA_artifacts to find the inputs.  Each step is a
 # single command so that it can be tested on its own, and the script is the guide for the Nextflow implementation.
-# Every tool is run in a docker container, the Python tools in drop-seq_python and the Java tools in drop-seq_private_java, both
+# Every tool is run in a docker container, the Python tools in drop-seq_python and the Java tools in drop-seq_java, both
 # with the tag from --image-tag, so that the whole workflow is pinned to one version.  To test local code, build the
 # images with the tag jn_test and use --image-tag jn_test.
 # The script itself only calls those tools and reads the tab-separated samplesheet written by
@@ -47,7 +47,7 @@ Usage: $0 --manifest dges.yaml --analysis-id ID --out-dir DIR [--image-tag TAG] 
   --out-dir DIR         Output directory.
   --tmp-dir DIR         Scratch directory.  Default: OUT_DIR/tmp.  The reduced GTF is only downloaded into it once.
   --image-tag TAG       Tag of the quay.io/broadinstitute/drop-seq_python and
-                        us.gcr.io/mccarroll-scrna-seq/drop-seq_private_java images.  Default: current
+                        quay.io/broadinstitute/drop-seq_java images.  Default: current
   --mmc-model MODEL     MapMyCells model (the mmc/<model> directory).  Default: the first one found.
   --mmc-level LEVEL     MapMyCells taxonomy level for the cell type.  Default: the top level of the taxonomy.
   --reference NAME      Reference name.  Skips the check that all libraries have the same reference.
@@ -101,7 +101,7 @@ PREFIX=$OUT_DIR/$ANALYSIS_ID
 # written by one tool are valid for the next.  The container runs as the current user, so that it does not write
 # root-owned files.
 PY_IMAGE=quay.io/broadinstitute/drop-seq_python:$IMAGE_TAG
-JAVA_IMAGE=us.gcr.io/mccarroll-scrna-seq/drop-seq_private_java:$IMAGE_TAG
+JAVA_IMAGE=quay.io/broadinstitute/drop-seq_java:$IMAGE_TAG
 in_container() {
   local image=$1
   shift

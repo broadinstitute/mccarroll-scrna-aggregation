@@ -46,6 +46,18 @@ nextflow run mccarroll/scrna-aggregation \
    --outdir <OUTDIR>
 ```
 
+To run the pipeline on Seqera Platform (Tower) instead, use the `launchScrnaAggregation` script from
+[mccarroll_tw_clp](https://github.com/broadinstitute/mccarroll_tw_clp). It takes the same manifest and launches the run for you:
+
+```bash
+uvx --from 'https://git@github.com/broadinstitute/mccarroll_tw_clp.git' launchScrnaAggregation \
+   --analysis-id MY_ANALYSIS \
+   --project <your project> \
+   -v manifest.yaml
+```
+
+See the mccarroll_tw_clp repository for the full list of options.
+
 The manifest options (donor, filters, joins, defaults) and the optional parameters (`--mmc_model`, `--mmc_level`) are described in
 [docs/usage.md](docs/usage.md), and the files in `<OUTDIR>` in [docs/output.md](docs/output.md). The documentation index is [docs/README.md](docs/README.md); running the
 tests is described in [docs/testing.md](docs/testing.md).
@@ -57,20 +69,13 @@ tests is described in [docs/testing.md](docs/testing.md).
 
 mccarroll/scrna-aggregation was originally written by James Nemesh.
 
-We thank the following people for their extensive assistance in the development of this pipeline:
-
-<!-- TODO nf-core: If applicable, make list of people who have also contributed -->
+The original pipeline was written by Alec Wysoker and Khalid Shakir.
 
 ## Contributions and Support
 
 If you would like to contribute to this pipeline, please see the [contributing guidelines](.github/CONTRIBUTING.md).
 
 ## Citations
-
-<!-- TODO nf-core: Add citation for pipeline after first release. Uncomment lines below and update Zenodo doi and badge at the top of this file. -->
-<!-- If you use mccarroll/scrna-aggregation for your analysis, please cite it using the following doi: [10.5281/zenodo.XXXXXX](https://doi.org/10.5281/zenodo.XXXXXX) -->
-
-
 
 This pipeline uses code and infrastructure developed and maintained by the [nf-core](https://nf-co.re) community, reused here under the [MIT license](https://github.com/nf-core/tools/blob/main/LICENSE).
 
