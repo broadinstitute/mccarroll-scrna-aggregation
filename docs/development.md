@@ -70,6 +70,13 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **nf-test gives each run `output/` and `work/` side by side**; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
 - **`git rm` refuses files with local modifications**. A `( ... &)` subshell finishes an agent command immediately: use a log file and a wait loop, or `run_in_background`.
 - **The `drop-seq_python` image has no `python3` on the PATH**; its Python is `/usr/local/dropseq/venv/dropseq/bin/python`.
+- **Mermaid figures (the README workflow figure) must not depend on the renderer's theme.** VSCode's Mermaid preview ignores the
+  `%%{init: ...themeVariables...}%%` line and uses its own dark theme in dark mode, but it does apply `classDef` and `style` lines. So give every node
+  an explicit fill AND text color: `classDef default fill:#ffffff,stroke:#333333,color:#111111` for the nodes with no class, `color:#111111` in every
+  other `classDef` and in each subgraph `style`, and `linkStyle default stroke:#8a8a8a` (gray lines show on black and on white). Without that, nodes
+  without a class get a dark fill under dark text. Check both cases before committing, with the init line removed for the dark one:
+  `npx -y @mermaid-js/mermaid-cli -i README.md -o out.md -e png -t dark -b '#111111'` and `... -t default -b white` (writes `out-1.png`; run it on a
+  copy in the scratchpad). Do not set `fontFamily`: the boxes are sized for another font and long names are cut off.
 
 ## Ground rules (from the user)
 
