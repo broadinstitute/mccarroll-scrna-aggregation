@@ -8,9 +8,9 @@ nextflow_process {
     tag "modules_local"
     tag "summarize_scrna_experiments"
 
-    // Contract: record(meta: Map, artifacts_yaml: Path) -> summary: record(meta: Map, metrics: Path '<id>.library_metrics.txt',
+    // Contract: record(id: String, artifacts_yaml: Path) -> summary: record(id: String, metrics: Path '<id>.library_metrics.txt',
     //   tearsheet: Path 'tearsheets/<id>.standard_analysis_tearsheet.txt').
-    // meta.id is the library id (uei); meta.analysis_id is the analysis id. The real-data check is in gcs.nf.test.
+    // id is the library id (uei). The real-data check is in gcs.nf.test.
     // Fixtures (tests/fixtures; the tool reads the files the YAML points at, mounted at /fixtures):
     //   LIB_FULL: small real files: properties (experimentDate 2024-01-02), execution trace dated 2026-03-04 (TASK_B failed
     //             once, then completed), read quality (2,000,000 / 1,900,000 / 1,800,000 reads), chimeric UMIs (5 of 1000),
@@ -24,12 +24,12 @@ nextflow_process {
         lines.drop(1).collect { l -> [header, l.split('\t', -1) as List].transpose().collectEntries { k, v -> [(k): v] } }
     }
 
-    test("Should emit one metrics row and one tearsheet named for the library, with meta propagated") {
+    test("Should emit one metrics row and one tearsheet named for the library, with the id propagated") {
 
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_FULL', analysis_id:'test_analysis' ], artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_FULL.yaml"))
+                input[0] = record(id: 'LIB_FULL', artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_FULL.yaml"))
                 """
             }
         }
@@ -41,12 +41,10 @@ nextflow_process {
             def header = metricsFile.readLines()[0].split('\t', -1) as List
             assertAll(
                 { assert process.success },
-                // one item per emit, same meta (id and analysis_id) on both
+                // one item per emit, the same id
                 { assert process.out.summary.size() == 1 },
-                { assert process.out.summary.size() == 1 },
-                { assert process.out.summary[0].meta == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
-                { assert process.out.summary[0].meta == [ id:'LIB_FULL', analysis_id:'test_analysis' ] },
-                // names come from meta.id
+                { assert process.out.summary[0].id == 'LIB_FULL' },
+                // names come from id
                 { assert metricsFile.name == 'LIB_FULL.library_metrics.txt' },
                 { assert tearsheetFile.name == 'LIB_FULL.standard_analysis_tearsheet.txt' },
                 // header plus exactly one row; first column is the library id; fixed 48-column header
@@ -78,7 +76,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_NA', analysis_id:'test_analysis' ], artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_NA.yaml"))
+                input[0] = record(id: 'LIB_NA', artifacts_yaml: file("${moduleDir}/tests/fixtures/LIB_NA.yaml"))
                 """
             }
         }

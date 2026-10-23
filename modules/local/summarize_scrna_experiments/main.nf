@@ -1,28 +1,28 @@
 nextflow.enable.types = true
 
 process SUMMARIZE_SCRNA_EXPERIMENTS {
-    tag "$meta.id"
+    tag "$id"
     label 'process_single'
 
     // The public Drop-seq image, tag 'current'. To use another tag (a branch build, say), override it with a withName: container setting in a config.
     container 'quay.io/broadinstitute/drop-seq_python:current'
 
     input:
-    // meta.id is the library id (uei); meta.analysis_id is the aggregation analysis id.
+    // id is the library id (uei).
     // artifacts_yaml is <library_id>.yaml written by LOCATE_SCRNA_ARTIFACTS (one dataset)
     record(
-        meta: Map,
+        id: String,
         artifacts_yaml: Path
     )
 
     output:
     // one record per library:
-    //   metrics: header + one row; first column 'library' is meta.id
+    //   metrics: header + one row; first column 'library' is id
     //   tearsheet: 'label' / 'value' rows
     summary = record(
-        meta: meta,
-        metrics: file("${meta.id}.library_metrics.txt"),
-        tearsheet: file("tearsheets/${meta.id}.standard_analysis_tearsheet.txt")
+        id: id,
+        metrics: file("${id}.library_metrics.txt"),
+        tearsheet: file("tearsheets/${id}.standard_analysis_tearsheet.txt")
     )
 
     script:
@@ -30,7 +30,7 @@ process SUMMARIZE_SCRNA_EXPERIMENTS {
     """
     summarize_scRNA_experiments \\
         --artifacts ${artifacts_yaml} \\
-        --summary ${meta.id}.library_metrics.txt \\
+        --summary ${id}.library_metrics.txt \\
         --tearsheet-dir tearsheets \\
         ${args}
     """
@@ -38,6 +38,6 @@ process SUMMARIZE_SCRNA_EXPERIMENTS {
     stub:
     """
     mkdir tearsheets
-    touch ${meta.id}.library_metrics.txt tearsheets/${meta.id}.standard_analysis_tearsheet.txt
+    touch ${id}.library_metrics.txt tearsheets/${id}.standard_analysis_tearsheet.txt
     """
 }

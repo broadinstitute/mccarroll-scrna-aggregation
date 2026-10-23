@@ -7,7 +7,7 @@ tests (`tests/run_all_tests.sh`) and as input of the prototype script
 | File | Scenario |
 |---|---|
 | `manifest.yaml` | library `SMRI_V11_rxn1`, village donor DGE (donors, MapMyCells). The validated reference run. |
-| `manifest_no_donors.yaml` | same library without donors: selected-cells DGE, exercises the no-donor skip branches (not yet run) |
+| `manifest_no_donors.yaml` | same library without donors: selected-cells DGE, would exercise the no-donor skip branches live (not run: the synthetic pipeline tests cover them) |
 
 The baseline output (analysis id `SMRI_V11.unfiltered`) is generated into `tests/live_data/baseline/`, which is git-ignored,
 so it is never committed. See `docs/testing.md`, "Live tests".

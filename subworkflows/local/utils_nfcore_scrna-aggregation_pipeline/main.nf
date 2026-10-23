@@ -23,9 +23,9 @@ include { UTILS_NEXTFLOW_PIPELINE   } from '../../nf-core/utils_nextflow_pipelin
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-// The aggregation manifest: meta.id is the analysis id (the same for every run-level process).
+// The aggregation manifest: id is the analysis id (the same for every run-level process).
 record Manifest {
-    meta: Map
+    id: String
     manifest: Path
 }
 
@@ -112,12 +112,12 @@ workflow PIPELINE_INITIALISATION {
 
     //
     // Input: params.manifest and params.analysis_id. Emits: ch_manifest, a value channel with one item, a Manifest record, where
-    // meta.id is the analysis id (the same for every run-level process)
+    // id is the analysis id (the same for every run-level process)
     //
-    ch_manifest = channel.value(record(meta: [ id: analysis_id ], manifest: file(manifest)))
+    ch_manifest = channel.value(record(id: analysis_id, manifest: file(manifest)))
 
     emit:
-    manifest: Value<Manifest> = ch_manifest    // one item: record(meta: [id: analysis id], manifest: path)
+    manifest: Value<Manifest> = ch_manifest    // one item: record(id: analysis id, manifest: path)
     entries: Value<List<Map>> = ch_entries     // one item: the list of manifest entries (maps), in manifest order
 }
 
@@ -206,8 +206,9 @@ def checkLocalGcpCredentials(profile: String, credentialsFileParam: String?, pro
 // Read and validate the aggregation manifest (YAML), before any process runs.
 //   manifestPath: local or gs:// path of the manifest (params.manifest)
 //   returns: one map per DGE in manifest order, [dge, donor, filters, joins], with dgeDefaults projected onto each
-//            entry; see lib/AggregationManifest.groovy. Also checks that the files of each entry can be staged (lib/JoinFilterArguments.groovy).
-//            Calls error() naming the path and the problem if invalid.
+//            entry; see lib/AggregationManifest.groovy. Also checks that the files of each entry can be staged (lib/JoinFilterArguments.groovy)
+//            and that every file the manifest names exists (DGEs, joinFile, includeFile, excludeFile; local or gs://, read with this run's
+//            credentials). Calls error() naming the path and the problem if invalid, listing every missing file at once.
 //
 def loadAggregationManifest(manifestPath: String) -> List<Map> {
     def manifestFile = file(manifestPath)
@@ -218,6 +219,7 @@ def loadAggregationManifest(manifestPath: String) -> List<Map> {
         def entries = AggregationManifest.parse(manifestFile.text)
         // builds the arguments of each entry only to report a problem (two files staged under one name) before any process runs
         entries.each { entry -> JoinFilterArguments.build(entry) }
+        AggregationManifest.checkFilesExist(entries, { path -> AggregationManifest.pathExists(file(path)) })
         return entries
     } catch (IllegalArgumentException e) {
         error("Invalid aggregation manifest '${manifestPath}': ${e.getMessage()}")

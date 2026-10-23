@@ -22,13 +22,13 @@ Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the re
 
 | What | Needs | Command |
 |---|---|---|
-| Unit tests of the Groovy code and pre-flight check (44) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (the live resolver test in that directory also needs the baseline) |
+| Unit tests of the Groovy code and pre-flight check (46) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (the live resolver test in that directory also needs the baseline) |
 | Unit tests of one module | Docker (the public images; `WRITE_TEXT_FILE` needs nothing) | `nf-test test modules/local/<module>/tests/main.nf.test` |
-| Pipeline tests on synthetic libraries (7) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
+| Pipeline tests on synthetic libraries (9) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
 | Pipeline input validation and `--help` (6) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
 | Live tests (11) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
 | Whole pipeline on Google Batch (a script, not an nf-test; costs a little money) | `nextflow`, `gsutil`, Application Default Credentials, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION` and the baseline | `tests/batch_full_run/run.sh` (see [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)) |
-| Everything: 104 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
+| Everything: 110 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
 
 To run less: add the ID nf-test prints in brackets to select one test (`...main.nf.test@14bbfafa`; the ID changes if the test is renamed), `--dry-run` to list what would run, or select by tag (`live`, `gcs`, `pipeline_synthetic`). A plain `nf-test test` also runs the live tests, which fail without the baseline, so use the script or select by path. `nf-test.config` sets the default profile to `docker,test`. Test output goes to `.nf-test/` (git-ignored).
 
@@ -39,7 +39,7 @@ One line per unit; the fixtures and the exact assertions are in each unit's `tes
 | Unit (`tests/` next to it) | Tests | What they check |
 |---|---|---|
 | Pre-flight credentials check (`preflight.function.nf.test`) | 12 | fails before any process, naming the problem and the remedy, for a missing, unreadable, non-JSON, wrongly typed or incomplete credentials file, or no project ID; passes for valid `authorized_user` and `service_account` files; skipped without the `docker` profile |
-| Manifest parsing (`manifest.function.nf.test`) | 12 | `dgeDefaults` are projected deeply onto each entry; unknown keys, bad types, duplicate DGEs and line breaks in values are rejected with a message naming the entry |
+| Manifest parsing (`manifest.function.nf.test`) | 14 | `dgeDefaults` are projected deeply onto each entry; unknown keys, bad types, duplicate DGEs and line breaks in values are rejected with a message naming the entry; every missing file the manifest names (and every file that cannot be checked) is reported at once, with its key and entries |
 | `join_and_filter_tsv` arguments (`arguments.function.nf.test`) | 7 | donor, joins and filters become the right arguments in the right order (as the Python resolver writes them); files are staged once by base name; two files with one base name are rejected |
 | Library resolver (`resolver.function.nf.test`) | 13 | each manifest entry is matched to its artifact; libraries are in manifest order; one reference, one reduced GTF and one MapMyCells model are enforced; all libraries have donors or none; cell type column and staged-name checks |
 | `LOCATE_SCRNA_ARTIFACTS` | 6 | one artifact YAML per library; missing optional artifacts are `NA`; the latest trace is chosen; a duplicate experiment fails |
@@ -55,7 +55,7 @@ One line per unit; the fixtures and the exact assertions are in each unit's `tes
 
 ## Pipeline tests on synthetic libraries
 
-`tests/pipeline.synthetic.nf.test` (7 tests): the whole pipeline on tiny local libraries, with real processes in Docker. They check what the live manifest (one library, no filters or joins) cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs. They are independent of the other tests: no `gs://`, no network, no credentials and no baseline (a fake service account key passes the pre-flight check, so `GOOGLE_PROJECT_ID` is not needed). Run them alone:
+`tests/pipeline.synthetic.nf.test` (9 tests): the whole pipeline on tiny local libraries, with real processes in Docker. They check what the live manifest (one library, no filters or joins) cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs. They are independent of the other tests: no `gs://`, no network, no credentials and no baseline (a fake service account key passes the pre-flight check, so `GOOGLE_PROJECT_ID` is not needed). Run them alone:
 
 ```bash
 nf-test test tests/pipeline.synthetic.nf.test        # or: nf-test test --tag pipeline_synthetic
@@ -151,7 +151,7 @@ Every comparison hashes first: the md5 of the generated file's content (decompre
 
 ### Step 1: make the baseline
 
-Run the prototype shell script on the manifest in the repo (`tests/live_data/manifest.yaml`, see `tests/live_data/README.md`). The output goes into `tests/live_data/baseline/`, which is git-ignored. Run from the repo root with the same image tag as the modules (`current`; the baseline in use was made with local `jn_test` builds, which behave the same for the live manifest):
+Run the prototype shell script on the manifest in the repo (`tests/live_data/manifest.yaml`, see `tests/live_data/README.md`). The output goes into `tests/live_data/baseline/`, which is git-ignored. Run from the repo root with the same image tag as the modules (`current`). The baseline in use was made this way with the public images in session 13 (digests `f28d971a...` python, `e3230deb...` java); it is identical, file for file, to the earlier one made with local `jn_test` builds:
 
 ```bash
 docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml \
@@ -171,7 +171,7 @@ export GOOGLE_PROJECT_ID=bican-um1-mccarroll
 Then run either:
 
 ```bash
-tests/run_all_tests.sh        # everything (104 tests); stops before starting Docker if the project ID, credentials file, nf-test or baseline is missing
+tests/run_all_tests.sh        # everything (110 tests); stops before starting Docker if the project ID, credentials file, nf-test or baseline is missing
 nf-test test --tag live       # only the live tests (11), with no pre-checks
 ```
 

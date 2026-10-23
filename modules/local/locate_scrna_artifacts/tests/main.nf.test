@@ -8,7 +8,7 @@ nextflow_process {
     tag "modules_local"
     tag "locate_scrna_artifacts"
 
-    // Contract: record(meta: Map, manifest: Path) -> artifacts_dir: record(meta: Map, artifacts: Path 'artifacts', a directory).
+    // Contract: record(id: String, manifest: Path) -> artifacts_dir: record(id: String, artifacts: Path 'artifacts', a directory).
     // The 'artifacts' directory holds one <uei>.yaml per manifest DGE, each with a 'datasets' list of length 1.
     // Fixtures (tests/fixtures) are a synthetic local tree mounted at /fixtures:
     //   LIB_A: complete (village V1, mmc MODEL1, two pipeline traces, reference with reduced GTF)
@@ -20,7 +20,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
@@ -44,7 +44,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_duplicate_uei.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_duplicate_uei.yaml"))
                 """
             }
         }
@@ -65,7 +65,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
@@ -94,7 +94,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
@@ -111,12 +111,12 @@ nextflow_process {
         }
     }
 
-    test("Should propagate meta and emit a directory named artifacts") {
+    test("Should propagate the id and emit a directory named artifacts") {
 
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }
@@ -126,7 +126,7 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.artifacts_dir.size() == 1 },
-                { assert emitted.meta.id == 'test_analysis' },
+                { assert emitted.id == 'test_analysis' },
                 { assert file(emitted.artifacts).isDirectory() },
                 { assert file(emitted.artifacts).name == 'artifacts' }
             )
@@ -138,7 +138,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'test_analysis' ], manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
+                input[0] = record(id: 'test_analysis', manifest: file("${moduleDir}/tests/fixtures/manifest_two_libraries.yaml"))
                 """
             }
         }

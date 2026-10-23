@@ -1,17 +1,19 @@
 nextflow.enable.types = true
 
 process FORMAT_MAPMYCELLS_ANNOTATIONS {
-    tag "$meta.id"
+    tag "$id"
     label 'process_single'
 
     // The public Drop-seq image, tag 'current'. To use another tag (a branch build, say), override it with a withName: container setting in a config.
     container 'quay.io/broadinstitute/drop-seq_python:current'
 
     input:
-    // meta.id is the library id. csv: MapMyCells result csv with '#' header lines and a cell_id column.
+    // id is the library id. csv: MapMyCells result csv with '#' header lines and a cell_id column.
+    // mmc_model: the MapMyCells model of the csv; conf/modules.config makes the column prefix <mmc_model>_ from it (ext.args).
     record(
-        meta: Map,
-        csv: Path
+        id: String,
+        csv: Path,
+        mmc_model: String
     )
 
     output:
@@ -21,14 +23,14 @@ process FORMAT_MAPMYCELLS_ANNOTATIONS {
     //     level, known only from the csv's '# taxonomy hierarchy' line). Read from the tool's one-line file; only the string leaves the task.
     //     All levels stay in the TSV; later steps group by this column.
     annotations = record(
-        meta: meta,
-        converted: file("${task.ext.prefix ?: meta.id}.mmc.tsv"),
+        id: id,
+        converted: file("${task.ext.prefix ?: id}.mmc.tsv"),
         cell_type_column: eval("cat cell_type_column.txt")
     )
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: meta.id
+    def prefix = task.ext.prefix ?: id
     """
     convert_mmc_csv \\
         --input ${csv} \\
@@ -38,7 +40,7 @@ process FORMAT_MAPMYCELLS_ANNOTATIONS {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: meta.id
+    def prefix = task.ext.prefix ?: id
     """
     touch ${prefix}.mmc.tsv
     echo stub_name > cell_type_column.txt

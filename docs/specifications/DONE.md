@@ -2,13 +2,17 @@
 
 What has been implemented and verified, kept as a record (moved out of the old TODO file, session 12). What is still to do is in `TODO.md`; design decisions and gotchas are in `../development.md`.
 
-## State at the end of session 12
+## State at the end of session 13
 
-The pipeline produces the baseline result locally (docker), on Google Batch (`-profile googlebatch`) and on Seqera Platform (launcher `launchScrnaAggregation` in `broadinstitute/mccarroll_tw_clp`; the pipeline is registered as `scrnaAggregation_prod`, revision git tag `prod`, per workspace: `bican-um1_RNAseq` and `pipeline-testing`; a new workspace needs its own `tw pipelines add`). Last full test run (session 10): `tests/run_all_tests.sh` 104 tests passed in 752 s; `tests/batch_full_run/run.sh` passed 12 of 12 checks. `nextflow lint .` is clean (49 files after the session 12 cleanup).
+The pipeline produces the baseline result locally (docker), on Google Batch (`-profile googlebatch`) and on Seqera Platform (launcher `launchScrnaAggregation` in `broadinstitute/mccarroll_tw_clp`; the pipeline is registered as `scrnaAggregation_prod`, revision git tag `prod`, per workspace: `bican-um1_RNAseq` and `pipeline-testing`; a new workspace needs its own `tw pipelines add`).
 
-- **The workflow is fully wired and the whole test suite is green:** `tests/run_all_tests.sh` ran 104 tests with no failures at the end of session 10 (752 s)
-  (needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`).
-  `nextflow lint .` is clean (50 files, no errors or warnings).
+- **Local:** `tests/run_all_tests.sh` passed 110 of 110 tests at the end of session 13 (791 s; needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default
+  Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`). `nextflow lint .` is clean (50 files, no errors or warnings).
+- **Google Batch:** `tests/batch_full_run/run.sh` last passed 12 of 12 checks in session 10, before the session 13 changes (to re-run, see `TODO.md`).
+- The baseline (`tests/live_data/baseline`) was remade with the public `current` images in session 13: the same 16 files, identical in content to the
+  earlier `jn_test` baseline (the old one was then deleted).
+- README has a workflow figure (Mermaid, rendered by GitHub; checked with `npx @mermaid-js/mermaid-cli`).
+- The session 13 work (branch `jn_simplify_dataflow`) is not committed yet.
 
 ## Work log
 
@@ -51,6 +55,15 @@ Committed in 6 groups (old resolver modules removed, modules, workflow/config/re
 - `manifest.homePage` and `contributors` filled in; README Credits, Seqera launch example.
 - `versions`: the hard-coded `current` image tags are the version record (user decision); `WRITE_VERSIONS` writes `pipeline_info/scrna-aggregation_software_versions.yml` (Nextflow and pipeline versions only).
 - Docs updated in session 6: `../output.md`, `../usage.md`, `../data_flow.md`, `../testing.md`, `../development.md`, `../credentials.md`; `docs/README.md` is the index.
+
+### Session 13: workflow data flow simplifications 1 to 3
+- `BUILD_LIBRARY_CELL_METADATA` takes `args: List<String>` and writes `<lib>.join_and_filter_args.txt` itself (`printf`, single-quoted; zero bytes for none). `WRITE_ARGS_FILE`, the `args_files` channel, its join and the id parsing from the file name are gone. 2 new module tests: the exact args file for a value with spaces, `$` and `'`, and a zero-byte file for no arguments.
+- `artifact_files` and its join are gone: each library is combined with the artifacts directory and resolves `<id>.yaml`.
+- `Library.mmc_annotations` is `String?` (null for none); `toLibraries` converts the resolver's `'NA'`.
+- **Top-level `id`, no `meta` (user decision):** every module record is `record(id: String, <the fields it uses>)`; FORMAT also takes `mmc_model` (its `ext.args` reads `${mmc_model}`, the `ext.prefix` closures `${id}`). `Library` has `analysis_id`, `position` and `mmc_model` as fields; per-library results are joined back to the libraries by `id` to be sorted. `Manifest` is `record(id, manifest)`.
+- Item 4: `libraries.join(annotations, by: 'id', remainder: true)` replaces the `mix` with null records. Item 5: the donor steps get the gated record directly (extra fields are accepted), with `combine(group_columns: [...])` or `+ record(group_columns: ...)`; the report takes `cell_type_inputs` as is. Item 6 dropped (nested paths are not staged; spike results in `../development.md`).
+- New tests: FORMAT with the pipeline's `ext.args` closure (prefix from `mmc_model`), and a synthetic run with one MapMyCells library and one without.
+- **Pre-flight file check:** `loadAggregationManifest` checks every file the manifest names (DGEs, `joinFile`, `includeFile`, `excludeFile`; local or `gs://`) before any process and lists all missing or uncheckable files in one error, each path once with its key and entries. Before, a missing join file failed only in BUILD (after LOCATE, SUMMARIZE, FORMAT and the metrics merge) as `FileNotFoundError: 'extra.tsv'`. 3 new tests (2 function, 1 synthetic pipeline); the manifest, arguments and resolver function tests now host on a local synthetic manifest so they stay offline.
 
 ## Modules (order follows the prototype's data flow)
 | Order | Module (prototype step) | Container | Status |

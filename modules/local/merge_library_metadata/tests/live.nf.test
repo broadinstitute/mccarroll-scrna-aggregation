@@ -36,7 +36,7 @@ nextflow_process {
             def inputs = baselineLibraries(root).collect { "file('${root}/artifacts/${it}.library_metrics.txt')" }.join(', ')
             process {
                 """
-                input[0] = record(meta: [ id:'${baselineAnalysis(root)}' ], tsvs: [ ${inputs} ])
+                input[0] = record(id: '${baselineAnalysis(root)}', tsvs: [ ${inputs} ])
                 """
             }
         }
@@ -75,7 +75,7 @@ nextflow_process {
             def inputs = baselineLibraries(root).collect { "file('${root}/${it}.joined_filtered_cell_metadata.txt')" }.join(', ')
             process {
                 """
-                input[0] = record(meta: [ id:'${baselineAnalysis(root)}' ], tsvs: [ ${inputs} ])
+                input[0] = record(id: '${baselineAnalysis(root)}', tsvs: [ ${inputs} ])
                 """
             }
         }

@@ -69,7 +69,7 @@ params {
 workflow MCCARROLL_SCRNA_AGGREGATION {
 
     take:
-    manifest: Value<Manifest>   // one item: record(meta: [id: analysis id], manifest: path)
+    manifest: Value<Manifest>   // one item: record(id: analysis id, manifest: path)
     entries: Value<List<Map>>   // one item: the list of manifest entries, in manifest order
     mmc_model: String?          // params.mmc_model, the MapMyCells model that replaces each library's first model
 
@@ -111,7 +111,7 @@ workflow {
     //
     // SUBWORKFLOW: Run initialisation tasks
     //
-    // Emits: init.manifest (one Manifest record, meta.id is the analysis id) and init.entries (one list of manifest entries).
+    // Emits: init.manifest (one Manifest record, id is the analysis id) and init.entries (one list of manifest entries).
     init = PIPELINE_INITIALISATION (
         params.version,
         params.validate_params,

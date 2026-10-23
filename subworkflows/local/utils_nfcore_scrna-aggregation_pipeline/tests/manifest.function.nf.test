@@ -26,12 +26,19 @@ nextflow_function {
         }
     }
 
+    // The host's input: a manifest whose files exist locally (the synthetic tree, see tests/fixtures/synthetic), so that loadAggregationManifest
+    // passes its file check without network or credentials. (projectDir is not available outside the when and then blocks.)
+    def localManifest = { ->
+        def repo = System.getProperty('user.dir')
+        SyntheticTree.materialize(new File("${repo}/tests/fixtures/synthetic".toString()), new File("${repo}/.nf-test/synthetic_root".toString())) + '/manifest_plain.yaml'
+    }
+
     test("Should project the default filters and joins onto entries that do not set them") {
 
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -73,7 +80,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -110,7 +117,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -138,7 +145,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -176,7 +183,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -202,7 +209,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -231,7 +238,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -258,7 +265,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -307,7 +314,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -333,7 +340,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -367,7 +374,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -377,8 +384,9 @@ nextflow_function {
             def noDonors = parse(new File("${projectDir}/tests/live_data/manifest_no_donors.yaml").text)
             assertAll(
                 { assert function.success },
-                { assert function.result.size() == 1 },
-                { assert function.result[0].dge.endsWith('SMRI_V11_rxn1.donors.digital_expression.txt.gz') },
+                // the host loaded the local manifest (manifest_plain.yaml: LIB_PLAIN_2, then LIB_PLAIN_1)
+                { assert function.result*.dge.collect { it.tokenize('/')[-1] } ==
+                    ['LIB_PLAIN_2.selected.digital_expression.txt.gz', 'LIB_PLAIN_1.selected.digital_expression.txt.gz'] },
                 { assert withDonors.size() == 1 },
                 { assert withDonors[0].dge.startsWith('gs://') && withDonors[0].dge.endsWith('.donors.digital_expression.txt.gz') },
                 { assert withDonors[0].donor == null },
@@ -395,7 +403,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -408,6 +416,91 @@ nextflow_function {
                 // both entries have no filters, so each gets both defaults, in the defaults' order
                 { assert entries.every { it.filters.keySet() as List == ['max.prob', 'doublet'] } },
                 { assert entries.every { it.filters['max.prob'] == [min: 0.8] && it.filters.doublet == [exclude: [true]] } }
+            )
+        }
+    }
+
+    // Contract: AggregationManifest.checkFilesExist(entries, exists) checks each path the entries name (dge, joinFile, includeFile, excludeFile)
+    // once with exists(path), and throws ONE IllegalArgumentException listing every missing path and every path that could not be checked
+    // (exists threw), in manifest order, each with its key and dge entries. loadAggregationManifest calls it with AggregationManifest.pathExists.
+    def yamlWithFiles = '''
+        dgeDefaults:
+          joins:
+            - {joinFile: /data/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
+        dges:
+          - dge: gs://b/one.txt.gz
+          - dge: gs://b/two.txt.gz
+            filters:
+              cell_barcode: {includeFile: /data/keep.txt, excludeFile: /data/drop.txt}
+    '''
+    // the message of the IllegalArgumentException of checkFilesExist, or null if every file passed
+    def filesFailure = { String yaml, Closure<Boolean> exists ->
+        try {
+            AggregationManifest.checkFilesExist(AggregationManifest.parse(yaml), exists)
+            return null
+        } catch (IllegalArgumentException e) {
+            return e.message
+        }
+    }
+
+    test("Should report every missing file at once, each with its key and the dge entries that name it, a default file once") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            def checked = []
+            def present = ['gs://b/one.txt.gz', '/data/drop.txt']
+            def message = filesFailure(yamlWithFiles, { String p -> checked << p; p in present })
+            assertAll(
+                { assert function.success },
+                // each path once, in manifest order
+                { assert checked == ['gs://b/one.txt.gz', '/data/extra.tsv', 'gs://b/two.txt.gz', '/data/keep.txt', '/data/drop.txt'] },
+                { assert message.readLines() == [
+                    'it names files that do not exist:',
+                    '  /data/extra.tsv (joinFile of join 1 in dge entries 1, 2)',
+                    '  gs://b/two.txt.gz (dge in dge entry 2)',
+                    '  /data/keep.txt (includeFile of filter cell_barcode in dge entry 2)' ] },
+                // nothing to report when every file exists
+                { assert filesFailure(yamlWithFiles, { String p -> true }) == null }
+            )
+        }
+    }
+
+    test("Should report a file that cannot be checked apart from the missing ones, and tell a missing local file from an existing one") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            def message = filesFailure(yamlWithFiles, { String p ->
+                if (p == 'gs://b/two.txt.gz') {
+                    throw new java.nio.file.AccessDeniedException(p)
+                }
+                p != '/data/keep.txt'
+            })
+            def existing = File.createTempFile('manifest_file', '.txt')
+            existing.deleteOnExit()
+            assertAll(
+                { assert function.success },
+                { assert message.readLines() == [
+                    'it names files that do not exist:',
+                    '  /data/keep.txt (includeFile of filter cell_barcode in dge entry 2)',
+                    "it names files that could not be checked (can this run's credentials read them?):",
+                    '  gs://b/two.txt.gz (dge in dge entry 2): AccessDeniedException: gs://b/two.txt.gz' ] },
+                // pathExists: true for a file, false for a path that does not exist (an AccessDeniedException would be thrown, not false)
+                { assert AggregationManifest.pathExists(existing.toPath()) },
+                { assert !AggregationManifest.pathExists(new File(existing.parentFile, "no_such_${existing.name}".toString()).toPath()) }
             )
         }
     }

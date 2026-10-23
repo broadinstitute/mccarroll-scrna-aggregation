@@ -22,7 +22,9 @@ To audit a run, look at `.nf-test/synthetic_root` (inputs), `.nf-test/tests/<tes
 | `manifest_filters.yaml` | donors N1/N2, a join (`files/extra.tsv`) from `dgeDefaults`, and the filters; expected cells: AAAA and ACAC of each library |
 | `manifest_cell_type_levels.yaml` | LIB_MMC_1 (donor N1) and LIB_MMC_SUPER (donor N3): different cell type columns by default, the same with `--mmc_level class` |
 | `manifest_mmc_model.yaml` | LIB_MMC_1 (N1) and LIB_MMC_2 (N2), run with `--mmc_model MODEL2` (each also has a `MODEL2` result with the classes Neuron / Glia) |
+| `manifest_mixed_mmc.yaml` | LIB_PLAIN_1 (no MapMyCells results) then LIB_MMC_1 (MapMyCells `MODEL1`), no donors: only LIB_MMC_1 is converted and joined |
 | `manifest_mixed_donors.yaml` | LIB_MMC_1 with a donor and LIB_PLAIN_1 without: the resolver stops the run |
+| `manifest_missing_files.yaml` | PLAIN_2 and PLAIN_1 with a missing join file (from `dgeDefaults`) and a missing `includeFile`: the run stops before any process |
 | `manifest_duplicate_cell.yaml` | LIB_DUP alone |
 | `fake_credentials.json` | a fake service account key that only passes the pre-flight check |
 | `reference/REF/` | empty fasta, and a reduced GTF with GENEA GENEB GENEC |

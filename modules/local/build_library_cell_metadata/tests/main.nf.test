@@ -8,10 +8,10 @@ nextflow_process {
     tag "modules_local"
     tag "build_library_cell_metadata"
 
-    // Contract: record(meta: Map, cell_metadata: Path, mmc_tsv: Path? (null for none), args_file: Path, extra_files: List<Path> ([] for none))
-    //           -> cell_metadata: record(meta: Map, cell_metadata: Path '<ext.prefix ?: meta.id>.joined_filtered_cell_metadata.txt').
-    // args_file holds the manifest's donor, joins and filters for join_and_filter_tsv --args-file, one argument per line (an empty file for none);
-    // there is no ext.args.
+    // Contract: record(id: String, cell_metadata: Path, mmc_tsv: Path? (null for none), args: List<String> ([] for none), extra_files: List<Path> ([] for none))
+    //           -> cell_metadata: record(id: String, cell_metadata: Path '<ext.prefix ?: id>.joined_filtered_cell_metadata.txt').
+    // args are the manifest's donor, joins and filters; the task writes them one per line to <id>.join_and_filter_args.txt (a zero-byte
+    // file for none) for join_and_filter_tsv --args-file; there is no ext.args. The tests read the arguments from the args_*.txt fixtures.
     // Fixtures: tests/fixtures/README.md. No live test: merged outputs are checked by the final integration test.
 
     def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
@@ -21,7 +21,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_empty.txt").readLines(), extra_files: [])
                 """
             }
         }
@@ -31,10 +31,10 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.cell_metadata.size() == 1 },
-                // meta propagated; name from meta.id
-                { assert process.out.cell_metadata[0].meta == [ id:'LIB_A' ] },
+                // id propagated; name from id
+                { assert process.out.cell_metadata[0].id == 'LIB_A' },
                 { assert file(process.out.cell_metadata[0].cell_metadata).name == 'LIB_A.joined_filtered_cell_metadata.txt' },
-                // PREFIX = meta.id first, then the original columns and rows in order
+                // PREFIX = id first, then the original columns and rows in order
                 { assert lines[0] == ['PREFIX', 'cell_barcode', 'num_transcripts', 'pct_mt', 'donor'] },
                 { assert lines.drop(1) == [
                     ['LIB_A', 'AAAA', '100', '0.05', 'd1'],
@@ -49,7 +49,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args: file("${moduleDir}/tests/fixtures/args_empty.txt").readLines(), extra_files: [])
                 """
             }
         }
@@ -74,7 +74,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args_file: file("${moduleDir}/tests/fixtures/args_donor_filters.txt"), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args: file("${moduleDir}/tests/fixtures/args_donor_filters.txt").readLines(), extra_files: [])
                 """
             }
         }
@@ -100,7 +100,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_join_extra.txt"), extra_files: [ file("${moduleDir}/tests/fixtures/extra.tsv") ])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_join_extra.txt").readLines(), extra_files: [ file("${moduleDir}/tests/fixtures/extra.tsv") ])
                 """
             }
         }
@@ -121,7 +121,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_A' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_special_value.txt"), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_special_value.txt").readLines(), extra_files: [])
                 """
             }
         }
@@ -129,11 +129,36 @@ nextflow_process {
         then {
             def lines = tsvLines(process.out.cell_metadata[0].cell_metadata)
             def donors = lines.drop(1).collect { it[lines[0].indexOf('donor')] }
+            def argsFile = new File(new File(process.out.cell_metadata[0].cell_metadata.toString()).parentFile, 'LIB_A.join_and_filter_args.txt')
             assertAll(
                 { assert process.success },
-                // no shell quoting is involved: the value is one argument, not expanded, and not split at the spaces
+                // the value is one argument, not expanded by the shell, and not split at the spaces
                 { assert donors == ["N 1 \$HOME 'r'"] * 3 },
-                { assert lines.size() == 4 }
+                { assert lines.size() == 4 },
+                // the arguments file the task wrote has the arguments exactly, one per line
+                { assert argsFile.text == "--set\ndonor\nN 1 \$HOME 'r'\n" }
+            )
+        }
+    }
+
+    test("Should write a zero-byte arguments file when there are no arguments") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: [], extra_files: [])
+                """
+            }
+        }
+
+        then {
+            def argsFile = new File(new File(process.out.cell_metadata[0].cell_metadata.toString()).parentFile, 'LIB_A.join_and_filter_args.txt')
+            assertAll(
+                { assert process.success },
+                // empty, not one empty line (which printf with no arguments would write)
+                { assert argsFile.exists() },
+                { assert argsFile.length() == 0 },
+                { assert tsvLines(process.out.cell_metadata[0].cell_metadata).size() == 4 }
             )
         }
     }
@@ -143,7 +168,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'LIB_NA' ], cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args_file: file("${moduleDir}/tests/fixtures/args_empty.txt"), extra_files: [])
+                input[0] = record(id: 'LIB_NA', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_empty.txt").readLines(), extra_files: [])
                 """
             }
         }

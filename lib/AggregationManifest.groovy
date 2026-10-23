@@ -96,6 +96,71 @@ class AggregationManifest {
         return entries
     }
 
+    /**
+     * Checks that every file the entries name exists: each dge, and the joinFile, includeFile and excludeFile of its joins and filters.
+     * Each path is checked once, so a file from dgeDefaults is reported once, with every entry that uses it.
+     * @param entries the result of parse
+     * @param exists tells whether a path exists; it throws when the path cannot be checked (no permission, for example)
+     * @throws IllegalArgumentException listing every missing file and every file that could not be checked, in manifest order, each with
+     *   the key and the (1-based) dge entries that name it
+     */
+    static void checkFilesExist(List<Map> entries, Closure<Boolean> exists) {
+        // path -> key ('dge', 'joinFile of join 1', 'includeFile of filter cell_barcode') -> dge entry numbers, in order of first use
+        Map<String, Map<String, List<Integer>>> uses = new LinkedHashMap()
+        entries.eachWithIndex { Map entry, int i ->
+            List<List<String>> named = [[entry.dge.toString(), 'dge']]
+            entry.joins.eachWithIndex { Map join, int j -> named << [join.joinFile.toString(), "joinFile of join ${j + 1}".toString()] }
+            entry.filters.each { String column, Map spec ->
+                ['includeFile', 'excludeFile'].each { String key ->
+                    if (spec.containsKey(key)) {
+                        named << [spec[key].toString(), "${key} of filter ${column}".toString()]
+                    }
+                }
+            }
+            named.each { List<String> pathAndKey ->
+                Map<String, List<Integer>> byKey = uses.computeIfAbsent(pathAndKey[0]) { new LinkedHashMap() }
+                byKey.computeIfAbsent(pathAndKey[1]) { [] } << (i + 1)
+            }
+        }
+        List<String> missing = []
+        List<String> unchecked = []
+        uses.each { String path, Map<String, List<Integer>> byKey ->
+            String named = byKey.collect { String key, List<Integer> numbers ->
+                "${key} in dge ${numbers.size() == 1 ? 'entry' : 'entries'} ${numbers.join(', ')}"
+            }.join('; ')
+            try {
+                if (!exists(path)) {
+                    missing << "  ${path} (${named})".toString()
+                }
+            } catch (Exception e) {
+                unchecked << "  ${path} (${named}): ${e.getClass().simpleName}: ${e.message}".toString()
+            }
+        }
+        List<String> lines = []
+        if (missing) {
+            lines += ['it names files that do not exist:'] + missing
+        }
+        if (unchecked) {
+            lines += ["it names files that could not be checked (can this run's credentials read them?):"] + unchecked
+        }
+        if (lines) {
+            throw bad(lines.join('\n'))
+        }
+    }
+
+    /**
+     * @return true if the file exists, false if it does not; any other IOException (no permission, for example) is thrown, so that "cannot
+     *   be checked" is not taken for "does not exist" (Files.exists returns false for both). Works for local paths and gs:// (Nextflow's file()).
+     */
+    static boolean pathExists(java.nio.file.Path path) {
+        try {
+            java.nio.file.Files.readAttributes(path, java.nio.file.attribute.BasicFileAttributes)
+            return true
+        } catch (java.nio.file.NoSuchFileException e) {
+            return false
+        }
+    }
+
     private static Object load(String yamlText) {
         LoaderOptions options = new LoaderOptions()
         // a repeated key would silently drop the earlier value, for example a whole list of filters

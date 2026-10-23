@@ -31,7 +31,7 @@ nextflow_process {
             def gtf = "${root}/tmp/${new File(rows[0].reduced_gtf).name}"
             process {
                 """
-                input[0] = record(meta: [ id:'live_analysis' ], prefixes: [ ${prefixes} ],
+                input[0] = record(id: 'live_analysis', prefixes: [ ${prefixes} ],
                     dges: [ ${dges} ],
                     barcode_lists: [ ${barcodeLists} ])
                 input[1] = file('${gtf}')

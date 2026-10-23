@@ -108,6 +108,72 @@ nextflow_pipeline {
         }
     }
 
+    // One library with MapMyCells results and one without in the same run: the library without gets no MapMyCells TSV (mmc_tsv null) and is not
+    // dropped, and only the other is converted and joined.
+    test("Should join MapMyCells results only to the library that has them and keep the library without") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_mixed_mmc.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            def log = new File(out.parentFile, 'meta/nextflow.log').text
+            def tasks = { name -> workflow.trace.succeeded().count { it.name.contains(name) } }
+            assertAll(
+                { assert workflow.success },
+                // both libraries, in manifest order; the MapMyCells class only on the cells of LIB_MMC_1
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.MODEL1_class_name } ==
+                    ['LIB_PLAIN_1:AAAA:', 'LIB_PLAIN_1:CCCC:', 'LIB_PLAIN_1:GGGG:',
+                     'LIB_MMC_1:AAAA:Glut', 'LIB_MMC_1:CCCC:GABA', 'LIB_MMC_1:GGGG:Glut', 'LIB_MMC_1:TTTT:Vip', 'LIB_MMC_1:ACAC:Glut'] },
+                { assert LiveFiles.lines(new File(out, 'barcodes.tsv.gz')).size() == 8 },
+                // one conversion (LIB_MMC_1), two builds
+                { assert tasks('FORMAT_MAPMYCELLS_ANNOTATIONS') == 1 },
+                { assert tasks('BUILD_LIBRARY_CELL_METADATA') == 2 },
+                // a cell type column exists (from LIB_MMC_1); the donor steps are skipped for the missing donors only
+                { assert log.contains('have no donors') },
+                { assert !log.contains('No library has MapMyCells results') }
+            )
+        }
+    }
+
+    // Files the manifest names are checked in PIPELINE_INITIALISATION: without it a missing join file fails only in BUILD_LIBRARY_CELL_METADATA, after
+    // the other steps, with the staged base name only.
+    test("Should stop before any process when files the manifest names do not exist, naming each path, key and entry") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_missing_files.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def root = synthetic()
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            def output = (workflow.stdout + workflow.stderr).join('\n') + log
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.trace.tasks().isEmpty() },
+                { assert output.contains('manifest_missing_files.yaml') },
+                { assert output.contains('it names files that do not exist:') },
+                // the original paths, once each; the join file from dgeDefaults with both entries
+                { assert output.contains("${root}/files/no_such_extra.tsv (joinFile of join 1 in dge entries 1, 2)") },
+                { assert output.contains("${root}/files/no_such_keep.txt (includeFile of filter cell_barcode in dge entry 2)") },
+                // the DGEs exist, so they are not listed
+                { assert !output.contains('(dge in dge entr') }
+            )
+        }
+    }
+
     test("Should fail in MERGE_CELL_METADATA when a library lists the same cell barcode twice") {
 
         when {

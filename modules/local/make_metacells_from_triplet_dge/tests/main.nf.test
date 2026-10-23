@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "make_metacells_from_triplet_dge"
 
-    // Contract: record(meta: Map, matrix: Path, features: Path, barcodes: Path, cell_metadata: Path, group_columns: List<String>)
-    //           -> metacells: record(meta: Map, metacells: Path '<ext.prefix ?: meta.id>.metacells.txt.gz').
+    // Contract: record(id: String, matrix: Path, features: Path, barcodes: Path, cell_metadata: Path, group_columns: List<String>)
+    //           -> metacells: record(id: String, metacells: Path '<ext.prefix ?: id>.metacells.txt.gz').
     // Fixtures: tests/fixtures/README.md (cells, counts and the expected sums are worked out there). Uses the local private Java
     // image (nextflow.config). The live comparison with the baseline is in live.nf.test.
 
@@ -26,7 +26,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ],
+                input[0] = record(id: 'analysis1',
                     matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
                     barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
                     group_columns: [ 'donor' ])
@@ -39,8 +39,8 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.metacells.size() == 1 },
-                // meta propagated; name from meta.id
-                { assert process.out.metacells[0].meta == [ id:'analysis1' ] },
+                // id propagated; name from id
+                { assert process.out.metacells[0].id == 'analysis1' },
                 { assert file(process.out.metacells[0].metacells).name == 'analysis1.metacells.txt.gz' },
                 // gene_id per row, in features order
                 { assert result.genes == ['ENSG01', 'ENSG02', 'ENSG03'] },
@@ -57,7 +57,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ],
+                input[0] = record(id: 'analysis1',
                     matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
                     barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
                     group_columns: [ 'donor', 'cell_type' ])
@@ -83,7 +83,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ],
+                input[0] = record(id: 'analysis1',
                     matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
                     barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
                     group_columns: [ 'donor' ])
@@ -110,7 +110,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ],
+                input[0] = record(id: 'analysis1',
                     matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
                     barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
                     group_columns: [ 'donor', 'cell_type' ])
@@ -134,7 +134,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ],
+                input[0] = record(id: 'analysis1',
                     matrix: file("${moduleDir}/tests/fixtures/matrix.mtx.gz"), features: file("${moduleDir}/tests/fixtures/features.tsv.gz"),
                     barcodes: file("${moduleDir}/tests/fixtures/barcodes.tsv.gz"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"),
                     group_columns: [ 'donor', 'no_such_column' ])
