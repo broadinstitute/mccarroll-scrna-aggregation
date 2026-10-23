@@ -50,7 +50,7 @@ nextflow_process {
             def analysis = baselineAnalysis(root)
             process {
                 """
-                input[0] = record(meta: [ id:'${analysis}' ],
+                input[0] = record(id: '${analysis}',
                     matrix: file('${root}/matrix.mtx.gz'), features: file('${root}/features.tsv.gz'),
                     barcodes: file('${root}/barcodes.tsv.gz'), cell_metadata: file('${root}/${analysis}.cell_metadata.txt'),
                     group_columns: [ 'donor' ])
@@ -65,7 +65,7 @@ nextflow_process {
             def generated = file(process.out.metacells[0].metacells)
             assertAll(
                 { assert process.success },
-                // the workflow sets ext.prefix to <analysis>.donors for this call; the module default is meta.id
+                // the workflow sets ext.prefix to <analysis>.donors for this call; the module default is id
                 { assert generated.name == "${analysis}.metacells.txt.gz".toString() },
                 { assert compare(generated, baseline) : "donor metacells differ from the baseline" }
             )
@@ -80,7 +80,7 @@ nextflow_process {
             def column = baselineCellTypeColumn(root, analysis)
             process {
                 """
-                input[0] = record(meta: [ id:'${analysis}' ],
+                input[0] = record(id: '${analysis}',
                     matrix: file('${root}/matrix.mtx.gz'), features: file('${root}/features.tsv.gz'),
                     barcodes: file('${root}/barcodes.tsv.gz'), cell_metadata: file('${root}/${analysis}.cell_metadata.txt'),
                     group_columns: [ 'donor', '${column}' ])

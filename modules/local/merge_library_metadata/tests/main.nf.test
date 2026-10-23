@@ -8,19 +8,19 @@ nextflow_process {
     tag "modules_local"
     tag "merge_library_metadata"
 
-    // Contract: record(meta: Map, tsvs: List<Path>) -> combined: record(meta: Map, combined: Path '<ext.prefix ?: meta.id>.txt').
+    // Contract: record(id: String, tsvs: List<Path>) -> combined: record(id: String, combined: Path '<ext.prefix ?: id>.txt').
     // Output columns are the union of the input columns (missing values empty); rows are the inputs' rows in input order.
     // The file-level config sets no ext.args; a test needing --index-col sets index.config itself. There is no live test: the merged outputs are checked by the final integration test.
     // Fixtures: tests/fixtures/README.md.
 
     def tsvLines = { f -> file(f).readLines().collect { it.split('\t', -1) as List } }
 
-    test("Should concatenate two libraries keeping every row, in input order, named for meta.id") {
+    test("Should concatenate two libraries keeping every row, in input order, named for id") {
 
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_b.tsv") ])
+                input[0] = record(id: 'analysis1', tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_b.tsv") ])
                 """
             }
         }
@@ -30,8 +30,8 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.combined.size() == 1 },
-                // meta propagated, name from meta.id
-                { assert process.out.combined[0].meta == [ id:'analysis1' ] },
+                // id propagated, name from id
+                { assert process.out.combined[0].id == 'analysis1' },
                 { assert file(process.out.combined[0].combined).name == 'analysis1.txt' },
                 // header + 2 + 2 rows; same header; rows of lib_a first, then lib_b, content unchanged
                 { assert lines.size() == 5 },
@@ -48,7 +48,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_c_extra_column.tsv") ])
+                input[0] = record(id: 'analysis1', tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_c_extra_column.tsv") ])
                 """
             }
         }
@@ -72,7 +72,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv") ])
+                input[0] = record(id: 'analysis1', tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv") ])
                 """
             }
         }
@@ -93,7 +93,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_a_duplicate_cell.tsv") ])
+                input[0] = record(id: 'analysis1', tsvs: [ file("${moduleDir}/tests/fixtures/lib_a.tsv"), file("${moduleDir}/tests/fixtures/lib_a_duplicate_cell.tsv") ])
                 """
             }
         }

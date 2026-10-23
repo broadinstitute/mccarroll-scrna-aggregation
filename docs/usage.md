@@ -31,7 +31,8 @@ dges:
 ```
 
 The manifest is checked before any process starts: unknown keys, wrong types, duplicate DGEs, and files that would be staged under the same name are
-reported with the DGE entry that has the problem. `--analysis_id` prefixes the merged output files and must differ from every library id (its UEI).
+reported with the DGE entry that has the problem. Every file the manifest names (DGEs, `joinFile`, `includeFile`, `excludeFile`) must exist and be
+readable with this run's credentials: all missing or unreadable files are listed at once, each with its key and DGE entries. `--analysis_id` prefixes the merged output files and must differ from every library id (its UEI).
 Files named in `joinFile`, `includeFile` and `excludeFile` use absolute paths (local files or `gs://`) and are staged by Nextflow. How the manifest becomes the
 arguments of each step is diagrammed in [data_flow.md](data_flow.md).
 

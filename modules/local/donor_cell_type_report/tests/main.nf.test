@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "donor_cell_type_report"
 
-    // Contract: record(meta: Map, cell_metadata: Path, cell_type_column: String)
-    //           -> report: record(meta: Map, report: Path '<ext.prefix ?: meta.id>.donor_cell_type.txt').
+    // Contract: record(id: String, cell_metadata: Path, cell_type_column: String)
+    //           -> report: record(id: String, report: Path '<ext.prefix ?: id>.donor_cell_type.txt').
     // Fixtures: tests/fixtures/README.md (expected counts, fractions and medians are worked out there).
     // The live comparison with the baseline is in live.nf.test.
 
@@ -21,7 +21,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_class_name')
+                input[0] = record(id: 'analysis1', cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_class_name')
                 """
             }
         }
@@ -31,8 +31,8 @@ nextflow_process {
             assertAll(
                 { assert process.success },
                 { assert process.out.report.size() == 1 },
-                // meta propagated; name from meta.id
-                { assert process.out.report[0].meta == [ id:'analysis1' ] },
+                // id propagated; name from id
+                { assert process.out.report[0].id == 'analysis1' },
                 { assert file(process.out.report[0].report).name == 'analysis1.donor_cell_type.txt' },
                 { assert lines[0] == header },
                 // donors, then cell types within a donor, in order of first appearance; fractions of the donor's cells,
@@ -51,7 +51,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata_missing_donor_or_cell_type.tsv"), cell_type_column: 'M_class_name')
+                input[0] = record(id: 'analysis1', cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata_missing_donor_or_cell_type.tsv"), cell_type_column: 'M_class_name')
                 """
             }
         }
@@ -78,7 +78,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_nope_name')
+                input[0] = record(id: 'analysis1', cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"), cell_type_column: 'M_nope_name')
                 """
             }
         }

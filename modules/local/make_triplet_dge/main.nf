@@ -1,19 +1,19 @@
 nextflow.enable.types = true
 
 process MAKE_TRIPLET_DGE {
-    tag "$meta.id"
+    tag "$id"
     label 'process_medium'
 
     // The public Drop-seq image, tag 'current'. To use another tag (a branch build, say), override it with a withName: container setting in a config.
     container 'quay.io/broadinstitute/drop-seq_java:current'
 
     input:
-    // meta.id is the analysis id. The three lists have one element per library, in the same (merge) order:
+    // id is the analysis id. The three lists have one element per library, in the same (merge) order:
     //   prefixes: library ids, prepended to every cell barcode as <prefix>_<barcode>
     //   dges: tabular DGEs (GENE column then one column per cell; genes lexically sorted)
     //   barcode_lists: TSVs with a cell_barcode column; only these cells of the matching DGE are kept
     record(
-        meta: Map,
+        id: String,
         prefixes: List<String>,
         dges: List<Path>,
         barcode_lists: List<Path>
@@ -27,7 +27,7 @@ process MAKE_TRIPLET_DGE {
     //   barcodes: one <prefix>_<barcode> per line, the matrix columns
     //   features: one gene_id, gene_name, 'Gene Expression' per line, the matrix rows
     triplet = record(
-        meta: meta,
+        id: id,
         matrix: file("matrix.mtx.gz"),
         barcodes: file("barcodes.tsv.gz"),
         features: file("features.tsv.gz")

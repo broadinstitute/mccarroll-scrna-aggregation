@@ -8,8 +8,8 @@ nextflow_process {
     tag "modules_local"
     tag "make_triplet_dge"
 
-    // Contract: record(meta: Map, prefixes: List<String>, dges: List<Path>, barcode_lists: List<Path>) + reduced_gtf: Path
-    //           -> triplet: record(meta: Map, matrix: Path 'matrix.mtx.gz', barcodes: Path 'barcodes.tsv.gz', features: Path 'features.tsv.gz').
+    // Contract: record(id: String, prefixes: List<String>, dges: List<Path>, barcode_lists: List<Path>) + reduced_gtf: Path
+    //           -> triplet: record(id: String, matrix: Path 'matrix.mtx.gz', barcodes: Path 'barcodes.tsv.gz', features: Path 'features.tsv.gz').
     // Fixtures: tests/fixtures/README.md. Uses the local private Java image (nextflow.config). No live test:
     // the merged matrix is checked by the final integration test.
 
@@ -20,7 +20,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                input[0] = record(id: 'analysis1', prefixes: [ 'LIB_A', 'LIB_B' ],
                     dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
                     barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
@@ -32,8 +32,8 @@ nextflow_process {
             def matrix = gzLines(process.out.triplet[0].matrix)
             assertAll(
                 { assert process.success },
-                // meta propagated; fixed names
-                { assert process.out.triplet[0].meta == [ id:'analysis1' ] },
+                // id propagated; fixed names
+                { assert process.out.triplet[0].id == 'analysis1' },
                 { assert file(process.out.triplet[0].matrix).name == 'matrix.mtx.gz' },
                 { assert file(process.out.triplet[0].barcodes).name == 'barcodes.tsv.gz' },
                 { assert file(process.out.triplet[0].features).name == 'features.tsv.gz' },
@@ -52,7 +52,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                input[0] = record(id: 'analysis1', prefixes: [ 'LIB_A', 'LIB_B' ],
                     dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
                     barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
@@ -79,7 +79,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_B' ],
+                input[0] = record(id: 'analysis1', prefixes: [ 'LIB_A', 'LIB_B' ],
                     dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
                     barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
@@ -106,7 +106,7 @@ nextflow_process {
             process {
                 """
                 // both libraries use the prefix LIB_A and have the cell AAAA
-                input[0] = record(meta: [ id:'analysis1' ], prefixes: [ 'LIB_A', 'LIB_A' ],
+                input[0] = record(id: 'analysis1', prefixes: [ 'LIB_A', 'LIB_A' ],
                     dges: [ file("${moduleDir}/tests/fixtures/lib_a.dge.txt"), file("${moduleDir}/tests/fixtures/lib_b.dge.txt") ],
                     barcode_lists: [ file("${moduleDir}/tests/fixtures/lib_a.cells.tsv"), file("${moduleDir}/tests/fixtures/lib_b.cells.tsv") ])
                 input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")

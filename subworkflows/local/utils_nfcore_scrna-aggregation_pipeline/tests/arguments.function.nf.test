@@ -29,12 +29,19 @@ nextflow_function {
         }
     }
 
+    // The host's input: a manifest whose files exist locally (the synthetic tree, see tests/fixtures/synthetic), so that loadAggregationManifest
+    // passes its file check without network or credentials. (projectDir is not available outside the when and then blocks.)
+    def localManifest = { ->
+        def repo = System.getProperty('user.dir')
+        SyntheticTree.materialize(new File("${repo}/tests/fixtures/synthetic".toString()), new File("${repo}/.nf-test/synthetic_root".toString())) + '/manifest_plain.yaml'
+    }
+
     test("Should write the donor, joins and filters in the order of the original Python resolver, with staged file names") {
 
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -78,7 +85,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -102,7 +109,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -131,7 +138,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -161,7 +168,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }
@@ -194,7 +201,7 @@ nextflow_function {
         when {
             function {
                 """
-                input[0] = "${projectDir}/tests/live_data/manifest.yaml"
+                input[0] = "${localManifest()}"
                 """
             }
         }

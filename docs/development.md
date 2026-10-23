@@ -12,7 +12,7 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - Run `nextflow lint .` after changing config or Nextflow files; it reports no errors or warnings (keep it that way). Workflow and include names must be valid identifiers: use underscores
   (`SCRNA_AGGREGATION`), never the hyphens of the pipeline name.
 
-- Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args` (BUILD_LIBRARY_CELL_METADATA is the exception: the manifest's arguments come in a staged args file read with `--args-file`).
+- Module names describe the step (`BUILD_LIBRARY_CELL_METADATA`), not the tool (`join_and_filter_tsv`). Optional tool arguments come from `task.ext.args` (BUILD_LIBRARY_CELL_METADATA is the exception: the manifest's arguments come as an `args` list, which the task writes to an args file read with `--args-file`).
 - Java modules: image `quay.io/broadinstitute/drop-seq_java:current`, JVM heap `(task.memory.toMega() * 4).intdiv(5)` MB (`as int` is rejected by typing), and `--TMP_DIR` in the task
   directory (the container's default temp dir is not writable). Fixture tests set a small `process.resourceLimits`.
 
@@ -21,7 +21,7 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 
 ## Static typing
 
-- Every script has `nextflow.enable.types = true`. Channel items are records (`record(meta: Map, ...)`; the per-library `Library` record is in `workflows/scrna-aggregation.nf`), `meta` stays a Map field. A typed process with
+- Every script has `nextflow.enable.types = true`. Channel items are records with a top-level `id` (`record(id: String, ...)`; the per-library `Library` record is in `workflows/scrna-aggregation.nf`) and no `meta` map: each process input lists the named, typed fields it uses (user decision, session 13), and `ext` closures read them directly (`${id}`, `${mmc_model}`). A typed process with
   one output uses a named record output (`name = record(...)`), because lint warns about several outputs.
 - `params` is a typed block in `main.nf` only (a params block elsewhere is a lint error): types there, defaults in `conf/params.config` (included by `nextflow.config`, listed in `nf-test.config` triggers).
   A `String?` param is optional; a param that is not declared is an error. Path-like params are Strings on purpose (`gs://`).
@@ -63,12 +63,20 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 
 - **`combine` flattens list items**: wrap a list in a list (`ch.map { [it] }`) or it spreads into separate elements.
 - **`splitCsv` takes a `"` at the START of a field as a quote** (not in the middle).
-- **`join` on maps (`meta`) works by equality**, but key by `meta.id` when the maps come from different places.
+- **Records:** a process input accepts a record with more fields than it declares (the extra ones are ignored); `rec + record(x: ...)` adds a field; `combine(name: [list])` keeps the list whole; `join(by: 'id', remainder: true)` leaves a missing field null.
+- **Paths nested in records inside a list are NOT staged** (the task gets the original path, and no file): keep files in `Path` or `List<Path>` fields of the input record itself (why MAKE_TRIPLET_DGE has three parallel lists).
 - **`path 'x'` in the `output` block nests**: a file that is already `tearsheets/<f>` needs `path '.'`. A `Value` emit is typed `Value<Path>`, a queue channel `Channel<Path>`.
 - **A process script block cannot read a staged path** (use a head-job `map` or pass text); `error()` inside an operator closure stops the run with that message.
 - **nf-test gives each run `output/` and `work/` side by side**; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
 - **`git rm` refuses files with local modifications**. A `( ... &)` subshell finishes an agent command immediately: use a log file and a wait loop, or `run_in_background`.
 - **The `drop-seq_python` image has no `python3` on the PATH**; its Python is `/usr/local/dropseq/venv/dropseq/bin/python`.
+- **Mermaid figures (the README workflow figure) must not depend on the renderer's theme.** VSCode's Mermaid preview ignores the
+  `%%{init: ...themeVariables...}%%` line and uses its own dark theme in dark mode, but it does apply `classDef` and `style` lines. So give every node
+  an explicit fill AND text color: `classDef default fill:#ffffff,stroke:#333333,color:#111111` for the nodes with no class, `color:#111111` in every
+  other `classDef` and in each subgraph `style`, and `linkStyle default stroke:#8a8a8a` (gray lines show on black and on white). Without that, nodes
+  without a class get a dark fill under dark text. Check both cases before committing, with the init line removed for the dark one:
+  `npx -y @mermaid-js/mermaid-cli -i README.md -o out.md -e png -t dark -b '#111111'` and `... -t default -b white` (writes `out-1.png`; run it on a
+  copy in the scratchpad). Do not set `fontFamily`: the boxes are sized for another font and long names are cut off.
 
 ## Ground rules (from the user)
 
@@ -83,12 +91,12 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - Do not commit / push unless asked. Never write into `/Users/nemesh/nextflow_aggregation_shell_script/out` (read-only old baseline). `tests/run_all_tests.sh` has no options.
   Keep `docs/testing.md`, `docs/development.md`, `docs/credentials.md` and this file updated.
 - No long foreground commands (120 s limit): run in the background and wait for the notification.
-- Add channel data-flow comments (input shape, output shape, `meta.id`, cardinality) above every channel definition in workflows.
+- Add channel data-flow comments (input shape, output shape, `id`, cardinality) above every channel definition in workflows.
 
 ## Design decisions (all user decisions unless marked)
 
 - **Manifest:** the workflow parses it (`AggregationManifest`, strict schema, `dgeDefaults` projected deeply, entry wins; `donor` / `filters` / `joins` per entry; `libraryId` rejected). Manifest-only
-  errors are reported in `PIPELINE_INITIALISATION` before any process. All manifest paths are absolute (local files or `gs://`); files named in `joinFile` / `includeFile` / `excludeFile` are staged by
+  errors are reported in `PIPELINE_INITIALISATION` before any process, including every file the manifest names (DGEs, `joinFile`, `includeFile`, `excludeFile`) that does not exist or cannot be checked (`AggregationManifest.checkFilesExist` / `pathExists`, head-job credentials; 'cannot check' fails the run too: user decision, session 13). Without it a missing join file failed only in BUILD, after the other steps, naming the staged base name only. All manifest paths are absolute (local files or `gs://`); files named in `joinFile` / `includeFile` / `excludeFile` are staged by
   Nextflow under their base names (two files with one base name are rejected, as is a name equal to the library's own cell metadata, MapMyCells TSV, args file or output).
 - **Library resolution (`lib/LibraryResolver.groovy`, head job, no process):** the library id is the artifact `uei`; an entry is matched to its artifact by `entry.dge == artifact.user_dge`. The library's
   DGE is the one the MANIFEST names, of any type (NOT donors-else-selected-cells as in the Python `resolve_aggregation_manifest`); the DGE may hold more barcodes than the cell metadata, the metadata selects
@@ -97,9 +105,9 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
   donors or none. The old `RESOLVE_LIBRARIES` process (TSV round trip) and `RESOLVE_AGGREGATION_MANIFEST` module were deleted.
 - **Donors are known upfront, not from file headers:** a library has donors if its manifest entry has a `donor` or its artifacts have a village (`village_properties != NA`); `hasDonors` is true for the run
   if all do. Donor steps are gated on that, the cell type steps on the presence of a cell type column; a skipped step logs a warning.
-- **Order:** libraries are merged in MANIFEST order (`position` in the record and in `meta_lib`); the merged metrics, the merged cell metadata and the triplet DGE are all made from ONE sorted list.
-- **Per library item (typed since session 8):** the `Library` record in `workflows/scrna-aggregation.nf`: `id`, `meta` (`[id, analysis_id, mmc_model, position]`), `dge`, `cell_metadata`, `mmc_annotations` ('NA' for none), `args: List<String>`, `files: List<String>`. `LibraryResolver` still returns Groovy maps (`libraryId`, `position`, `hasDonor`, ...); `toLibraries` converts them.
-- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; the workflow writes `<lib>.join_and_filter_args.txt` with the `WRITE_ARGS_FILE` exec process (work directory only) and BUILD reads it with
+- **Order:** libraries are merged in MANIFEST order (`position` in the `Library` record; the per-library results are joined back to the libraries by `id` to be sorted); the merged metrics, the merged cell metadata and the triplet DGE are all made from ONE sorted list.
+- **Per library item (typed since session 8):** the `Library` record in `workflows/scrna-aggregation.nf`: `id`, `analysis_id`, `position`, `mmc_model` (`String?`), `dge`, `cell_metadata`, `mmc_annotations` (`String?`, null for none; `toLibraries` converts the resolver's `'NA'`), `args: List<String>`, `files: List<String>`. `LibraryResolver` still returns Groovy maps (`libraryId`, `position`, `hasDonor`, ...); `toLibraries` converts them.
+- **Arguments:** `JoinFilterArguments.build(entry)` gives `args` and `files`; BUILD takes `args` as a list, writes `<lib>.join_and_filter_args.txt` in its task directory (`printf '%s\n'` with each argument single-quoted; a zero-byte file for none) and reads it with
   `join_and_filter_tsv --args-file` (python repo branch `jn_modify_aggregation_python_tools`, public main #589). No `ext.args` for BUILD.
 - **Summary for people:** `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`, plain text (reference, reduced GTF, donors, per library the DGE, cell metadata, MapMyCells, extra files and arguments); nothing reads it back.
 - **Publishing (explicit: the `output` block and `publish:` in `main.nf`; nothing is published unless listed; module tests run one process and publish nothing):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,

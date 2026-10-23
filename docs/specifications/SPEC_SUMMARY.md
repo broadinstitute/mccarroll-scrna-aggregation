@@ -1,6 +1,7 @@
 # scRNA aggregation: spec summary (derived from the prototype)
 
-Source of truth: `scrna-aggregation_prototype.sh` (outputs validated). Behavior below is read from it; nothing is invented.
+Source of truth: `scrna-aggregation_prototype.sh` (outputs validated). Behavior below is read from it; nothing is invented. Where the pipeline
+differs from the prototype, the difference is noted ("Pipeline:"); the full design is in `../development.md` and `../data_flow.md`.
 Companion files: `TODO.md` (what is left), `DONE.md` (what is done), `../development.md` (decisions, gotchas, how to run).
 
 ## Purpose
@@ -8,23 +9,25 @@ Aggregate several single-library Nextflow scRNA pipeline outputs (selected by a 
 analysis: library metrics, combined cell metadata, combined triplet (mtx) DGE, donor/cell-type report, and donor and
 donor x cell-type metacells.
 
-## Inputs (prototype flags -> proposed params)
-| Prototype flag | Meaning | Proposed param |
+## Inputs (prototype flags -> pipeline params)
+| Prototype flag | Meaning | Pipeline param |
 |---|---|---|
 | --manifest | YAML: `dges:` list (dge, optional donor/filters/joins) + `dgeDefaults` | params.manifest |
 | --analysis-id | prefix of aggregate output files | params.analysis_id |
 | --out-dir | output dir | params.outdir |
 | --tmp-dir | scratch | not needed (Nextflow work dir) |
 | --image-tag | tag of python/java images | fixed to `current` in each module (override per process in a config) |
-| --mmc-model / --mmc-level / --reference | optional | params.mmc_model / mmc_level / reference |
-| --java-memory | `-m` for Java tools | params.java_memory (default 8g); tie to task.memory |
+| --mmc-model / --mmc-level | optional | params.mmc_model / mmc_level |
+| --reference | optional | none: libraries with different references fail in the resolver |
+| --java-memory | `-m` for Java tools | none: the JVM heap is 80% of `task.memory` (15 GB, then 30 GB, for the three Java steps in `conf/modules.config`) |
+| (none) | GCP credentials mounted into the containers | params.gcp_credentials_file (docker profile only; default: your Application Default Credentials) |
 
 Containers: python tools `quay.io/broadinstitute/drop-seq_python:current`; java tools `quay.io/broadinstitute/drop-seq_java:current` (both public; the
 prototype used the private Java image, but the public `current` one has `MakeTripletDge` and `MakeMetacellsFromTripletDge`). The names and tag are hard coded in the
 modules. Note `docker.registry = 'quay.io'` in nextflow.config only prefixes images with no host, so it does not rewrite these fully-qualified names.
-Credentials: prototype mounts ADC and copies gs:// on the host. In Nextflow, gs:// paths staged natively on GCP; tools
-that read gs:// themselves (locate_scRNA_artifacts, summarize_scRNA_experiments reading artifact URLs) need credentials
-in the container (open question Q2).
+Credentials: prototype mounts ADC and copies gs:// on the host. Pipeline: Nextflow stages gs:// inputs; the tools that read gs://
+themselves (locate_scRNA_artifacts, summarize_scRNA_experiments) get credentials in the container: the mounted credentials file with the
+`docker` profile, the VM's service account on Google Batch (see `../credentials.md`).
 
 ## Steps (prototype section -> tool -> data)
 | # | Step | Tool (container) | Cardinality | In -> Out |
@@ -45,32 +48,41 @@ in the container (open question Q2).
 | 8 | donor metacells | `MakeMetacellsFromTripletDge -m MEM MATRIX FEATURES BARCODES MAPPING=cell_metadata CELL_BARCODE_COLUMN=cell_barcode TMP_DIR VALIDATION_STRINGENCY=SILENT OUTPUT=ID.donors.metacells.txt.gz GROUP_COLUMNS=donor` (java) | needs donor col | |
 | 9 | donor x cell type metacells | same, `OUTPUT=ID.donor_cell_type.metacells.txt.gz GROUP_COLUMNS=donor GROUP_COLUMNS=COL` | needs donor col and cell type col | |
 
-## Outputs (published to outdir)
+## Outputs (prototype, written to out-dir)
 `ID.library_metrics.txt`, `tearsheets/<lib>.standard_analysis_tearsheet.txt`, `<lib>.joined_filtered_cell_metadata.txt`,
 `ID.make_triplet_dge.yaml`, `ID.cell_type_column.txt` (only with MapMyCells results; added to the prototype 2026-10-16), `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
 `ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`
 (+ intermediate `artifacts/`, `resolved_manifest/`).
 
+Pipeline: publishes the merged files flat in `--outdir` (`ID.library_metrics.txt`, `ID.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`,
+`features.tsv.gz`; with donors also `ID.donors.metacells.txt.gz`, and with donors and a cell type column also `ID.donor_cell_type.txt` and
+`ID.donor_cell_type.metacells.txt.gz`), `artifacts/<uei>.yaml`, `tearsheets/` and `pipeline_info/` (with `ID.resolved_libraries.txt`). The
+per-library joined cell metadata, the triplet manifest and the args files stay in the work directory; there is no `cell_type_column.txt` or
+`resolved_manifest/`.
+
 ## Reference run (real data, validated)
 Reproducible from the repo: `tests/live_data/manifest.yaml` run through `scrna-aggregation_prototype.sh` with
-`--analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline` (git-ignored; see `docs/testing.md`, "Live tests").
+`--analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current` (git-ignored; see `docs/testing.md`, "Live tests"),
+made with the public `current` images (session 13).
 The original validated run, kept for reference and never modified, is in `/Users/nemesh/nextflow_aggregation_shell_script/out`.
 - 1 library `SMRI_V11_rxn1` (donor DGE, village), 238 cells (239 lines w/ header), 12778 genes, ~17 donors, MMC model
   HMBA_Human_WB_v0.5, cell type column `HMBA_Human_WB_v0.5_neighborhood_name`, empty args file.
 - Inputs fetched to `<out-dir>/tmp/SMRI_V11_rxn1/`: `cmd.tsv` (238 rows), `mmc.csv` (3752 rows; superset of cells, hence the
   left join), `*.donors.digital_expression.txt.gz` (12787 lines, 255 KB), `../tmp/GRCh38_ensembl_v43.reduced.gtf` (3.9M lines).
-- `tests/live_data/manifest_no_donors.yaml` = second scenario (selected-cells DGE, no donor column, probably no MMC) -> exercises the skip branches (not yet run).
+- `tests/live_data/manifest_no_donors.yaml` = second scenario (selected-cells DGE, no donor column, probably no MMC) -> would exercise the skip branches live (not run: the synthetic pipeline tests cover the no-donor and no-MapMyCells branches).
 - Single library only: multi-library behavior (cat_tsvs union columns, index uniqueness, MakeTripletDge merging, cell
-  type column mismatch error) is NOT covered by the reference run; synthetic second library needed for it.
+  type column mismatch error) is NOT covered by the reference run; the synthetic pipeline tests (`tests/pipeline.synthetic.nf.test`) cover it.
 
-## Data-flow hazards noted for Nextflow
-- Prototype uses absolute host paths inside files (triplet manifest, artifacts yaml); in Nextflow the manifest must be
-  generated inside the task from staged files (basenames).
-- `libraries.tsv` and args files are produced at runtime -> parse with splitCsv(sep:'\t', header:true) after the
-  resolve step; the per-library filter/join arguments will be built by the workflow from the manifest and passed as `ext.args` (see ../development.md); older idea of reading the args file in the script is superseded.
-- Optional MMC (value `NA`) -> per-library conditional; cell-type column is a runtime value (file content) that
-  gates steps 7 and 9; donor presence is a runtime check of the header gating 7-9.
-- Prototype gather steps need meta.id and stable ordering (cat_tsvs output order follows input order; sort by library).
+## Data-flow hazards noted for Nextflow, and how the pipeline handles them
+- Prototype uses absolute host paths inside files (triplet manifest, artifacts yaml). Pipeline: MAKE_TRIPLET_DGE writes its manifest in the task
+  from the staged file names.
+- `libraries.tsv` and the args files are produced at runtime by the prototype. Pipeline: no `libraries.tsv`; `LibraryResolver` (Groovy, head job)
+  resolves the libraries, `JoinFilterArguments` builds each library's arguments from the manifest, and BUILD_LIBRARY_CELL_METADATA writes them to
+  `<lib>.join_and_filter_args.txt` in its task and reads it with `--args-file` (no `ext.args`).
+- Optional MMC (value `NA`) -> per-library conditional; the cell type column is a runtime value (the tool's output) that gates steps 7 and 9.
+  Pipeline: the donor gate is known upfront (a manifest donor or a village in the artifacts, for all libraries or none), not read from the header.
+- Prototype gather steps need stable ordering (cat_tsvs output order follows input order). Pipeline: libraries are merged in manifest order
+  (`position`), and the metrics, the cell metadata and the triplet DGE are made from one sorted list.
 - No `zcat` on macOS for .gz: use `gzip -dc` when inspecting fixtures locally.
 
 ## Module for each prototype step (status in DONE.md)

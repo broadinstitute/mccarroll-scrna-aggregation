@@ -35,7 +35,7 @@ nextflow_process {
             def column = baselineCellTypeColumn(root, analysis)
             process {
                 """
-                input[0] = record(meta: [ id:'${analysis}' ], cell_metadata: file('${root}/${analysis}.cell_metadata.txt'), cell_type_column: '${column}')
+                input[0] = record(id: '${analysis}', cell_metadata: file('${root}/${analysis}.cell_metadata.txt'), cell_type_column: '${column}')
                 """
             }
         }

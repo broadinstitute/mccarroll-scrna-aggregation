@@ -6,8 +6,8 @@ and FORMAT_MAPMYCELLS_ANNOTATIONS + BUILD_LIBRARY_CELL_METADATA (4) are wired; *
 
 Legend: `[process]` runs in a container; `[exec]` is an `exec` process (`WRITE_TEXT_FILE`: runs in the head job, no container, no VM); `[groovy]` runs in the head job (no container, pure functions in `lib/`, unit tested); `==>` a published file.
 
-Typing: the scripts use `nextflow.enable.types = true`. Channel items are records, not tuples: `Manifest(meta, manifest)` from the initialisation, a `Library(id, meta, dge, cell_metadata, mmc_annotations, args, files)` record
-declared in `workflows/scrna-aggregation.nf` for each library, and the process inputs and outputs listed in [testing.md](testing.md). Per-library pieces are joined with `join(by: 'id')`, not by tuple position.
+Typing: the scripts use `nextflow.enable.types = true`. Channel items are records, not tuples: `Manifest(id, manifest)` from the initialisation, a `Library(id, analysis_id, position, mmc_model, dge, cell_metadata, mmc_annotations, args, files)` record
+declared in `workflows/scrna-aggregation.nf` for each library, and the process inputs and outputs listed in [testing.md](testing.md). Every record has a top-level `id` (the library id, or the analysis id for analysis-level steps) and no `meta` map: each process input lists the named fields it uses. Per-library pieces are joined with `join(by: 'id')`, not by tuple position.
 `params` is a typed block in `main.nf` (types only); the default values are in `conf/params.config`, included by `nextflow.config`.
 
 ## The flow
@@ -26,7 +26,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
         |                                               |
         v                                               |
  [process] LOCATE_SCRNA_ARTIFACTS                       |
-   in : [meta(id=analysis), manifest]  (reads dge + donor; lists gs://)
+   in : [id=analysis, manifest]  (reads dge + donor; lists gs://)
    out: artifacts/<uei>.yaml, one per DGE               |
         |                                               |
         v                                               |
@@ -44,28 +44,27 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
         |
         +--> LibraryResolver.summaryText -> [exec] WRITE_RESOLVED_SUMMARY -> <analysis>.resolved_libraries.txt ==> pipeline_info/   (plain text for people; nothing reads it back)
         |
-        +--> flatMap (toLibraries) -> one Library record per library: id, meta(id=library, analysis_id, mmc_model), dge, cell_metadata, mmc_annotations, args (List), files (List)
+        +--> flatMap (toLibraries) -> one Library record per library: id, meta(id=library, analysis_id, mmc_model), dge, cell_metadata, mmc_annotations (null for none), args (List), files (List)
         |
         +--> per library (ch_libraries items; the pieces are joined on the library id)
                |
-               +--> [exec] WRITE_ARGS_FILE { JoinFilterArguments.toArgsFileText(library.args) } -> <lib>.join_and_filter_args.txt   (work directory only, not published)
-               |
-               +--> [process] SUMMARIZE_SCRNA_EXPERIMENTS       in: [meta(lib), artifacts/<lib>.yaml] (YAML picked from the artifacts directory by file name = library id)
+               +--> [process] SUMMARIZE_SCRNA_EXPERIMENTS       in: [id=lib, artifacts/<lib>.yaml] (libraries combined with the artifacts directory; the YAML is <library id>.yaml in it)
                |                                                 -> <lib>.library_metrics.txt (work directory only), tearsheet ==> tearsheets/
-               |                  all libraries, in manifest order (meta.position; collect() then toSorted) -> [process] MERGE_LIBRARY_METRICS -> <analysis>.library_metrics.txt ==> flat in outdir
+               |                  all libraries, in manifest order (position, from a join with the libraries; collect() then toSorted) -> [process] MERGE_LIBRARY_METRICS -> <analysis>.library_metrics.txt ==> flat in outdir
                |
-               +--> [process] FORMAT_MAPMYCELLS_ANNOTATIONS     only if mmcAnnotations != NA (ext.args: --column-prefix <model>_ [--level params.mmc_level])
-               |                in: [meta(lib), mmcAnnotations csv] -> <lib>.mmc.tsv (not published), cell_type_column (string)
+               +--> [process] FORMAT_MAPMYCELLS_ANNOTATIONS     only if mmc_annotations is not null (ext.args: --column-prefix <model>_ [--level params.mmc_level])
+               |                in: [id=lib, mmcAnnotations csv, mmc_model] -> <lib>.mmc.tsv (not published), cell_type_column (string)
                |                all columns -> [groovy] LibraryResolver.checkCellTypeColumn(ids, columns) (fails if they differ)
                |                            -> cell type column (value, '' for none; used by DONOR_CELL_TYPE_REPORT and the metacells)
                |
                +--> [process] BUILD_LIBRARY_CELL_METADATA   (work directory only)                            [done: takes --args-file]
-                                in : cellMetadata, <lib>.mmc.tsv (or []), <lib>.join_and_filter_args.txt, files (staged by base name, or [])
-                                cmd: join_and_filter_tsv --input <cmd.tsv> --set-first --set PREFIX <lib> [--join <lib>.mmc.tsv cell_barcode cell_id]
+                                in : cellMetadata, <lib>.mmc.tsv (or null: libraries joined with the TSVs with remainder: true), args (List), files (staged by base name, or [])
+                                cmd: printf the args, one per line (single-quoted; none: a zero-byte file) > <lib>.join_and_filter_args.txt
+                                     join_and_filter_tsv --input <cmd.tsv> --set-first --set PREFIX <lib> [--join <lib>.mmc.tsv cell_barcode cell_id]
                                        --args-file <lib>.join_and_filter_args.txt
                                 out: <lib>.joined_filtered_cell_metadata.txt
                |
-               +--> ONE sorted list of the built libraries (id, meta, cell metadata, DGE = the manifest DGE), in manifest order (meta.position)
+               +--> ONE sorted list of the built libraries (id, analysis_id, position, cell metadata, DGE = the manifest DGE), in manifest order (position)
                         |--> [process] MERGE_CELL_METADATA (alias of MERGE_LIBRARY_METADATA; --index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt ==> flat in outdir
                         |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 15 GB)
                                   -> matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz ==> flat in outdir      [done: edge 5]
@@ -87,7 +86,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
 | Where errors appear | after LOCATE listed `gs://` | manifest-only errors before LOCATE; artifact errors right after it |
 | Donor | read from the artifact (copied there from the manifest by LOCATE) | read from the manifest entry |
 | File paths in the arguments | original paths | staged base names; the originals go in `files` for Nextflow to stage; two files with one base name are rejected |
-| How the arguments reach the tool | `<lib>.join_and_filter_args.txt` written by RESOLVE, expanded by the shell in the prototype | the same file, written by the workflow, read by `join_and_filter_tsv --args-file` (no `ext.args`, no shell quoting) |
+| How the arguments reach the tool | `<lib>.join_and_filter_args.txt` written by RESOLVE, expanded by the shell in the prototype | the same file, written by the BUILD_LIBRARY_CELL_METADATA task from its `args` list (each argument single-quoted for `printf`), read by `join_and_filter_tsv --args-file` (no `ext.args`; the tool reads the arguments from the file, not from the shell) |
 | `libraries.tsv` | RESOLVE output with task-local paths | `LibraryResolver.resolve` result, kept as Groovy values in the channel; `LibraryResolver.summaryText` writes it as plain text to `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` for people |
 | New checks | | same user_dge in two artifacts; libraries with MapMyCells results of different models (set `mmc_model`); staged files named like `<lib>.mmc.tsv`, the arguments file, the cell metadata or the output |
 
@@ -96,6 +95,6 @@ Publishing: `SCRNA_AGGREGATION` emits one channel per published file; the entry 
 
 ## Where to look when something looks wrong
 - What did the YAML become? `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt` (plain text: per library the DGE, cell metadata, MapMyCells result, extra files and arguments) and `<lib>.join_and_filter_args.txt` (the exact arguments, one per line; not
-  published, it is the staged input in the work directory of the library's BUILD_LIBRARY_CELL_METADATA task).
-- What did a task run? Its `.command.sh` (shows `--args-file`), and the args file staged next to it.
-- Why was a manifest rejected? The message names the DGE entry, the key and the rule (`tests/manifest.function.nf.test` lists every rule).
+  published, the library's BUILD_LIBRARY_CELL_METADATA task writes it in its work directory).
+- What did a task run? Its `.command.sh` (shows the `printf` that writes the args file and `--args-file`), and the args file next to it.
+- Why was a manifest rejected? The message names the DGE entry, the key and the rule (`tests/manifest.function.nf.test` lists every rule). Files the manifest names that do not exist, or that this run's credentials cannot read, are all listed at once, before any process.
