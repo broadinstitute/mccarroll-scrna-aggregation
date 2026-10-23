@@ -3,9 +3,7 @@
 Only what is still to be done. Done work is in `DONE.md`; design decisions, gotchas and ground rules are in `../development.md`. Process for each item: clarification questions (two options each), data contract, severity-ranked candidate tests, STOP for the user's selection, then implement (see the ground rules in `../development.md`).
 
 ## Before the next release
-- Commit the session 13 work (branch `jn_simplify_dataflow`; `tests/run_all_tests.sh` passed 110 of 110 on it, 791 s).
-- Run `tests/batch_full_run/run.sh` on Google Batch: the record shapes changed (top-level `id`, no `meta`), and the new manifest file check reads `gs://` from the head job, which no Google Batch or Seqera run has done yet. If the head job's credentials cannot read a data bucket, the run now stops at the start.
-- Then move the git tag `prod` to the latest commit (it is on `b6d1788`, the merge of PR #3) so Seqera runs pick up the changes.
+- Merge the session 13 PR (branch `jn_simplify_dataflow`), then move the git tag `prod` to the merge commit (it is on `b6d1788`, the merge of PR #3) so Seqera runs pick up the changes.
 - Delete the scratch data of the Google Batch checks: `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/{work,out}`, `gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/nf-test-batch-work/` and `gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work/`.
 
 ## Needs more data

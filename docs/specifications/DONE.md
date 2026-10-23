@@ -8,11 +8,12 @@ The pipeline produces the baseline result locally (docker), on Google Batch (`-p
 
 - **Local:** `tests/run_all_tests.sh` passed 110 of 110 tests at the end of session 13 (791 s; needs `GOOGLE_PROJECT_ID`, Docker, network, Application Default
   Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`). `nextflow lint .` is clean (50 files, no errors or warnings).
-- **Google Batch:** `tests/batch_full_run/run.sh` last passed 12 of 12 checks in session 10, before the session 13 changes (to re-run, see `TODO.md`).
+- **Google Batch:** `tests/batch_full_run/run.sh` passed 12 of 12 checks on the session 13 code (project `mccarroll-scrna-seq`, `us-central1`): the
+  published files equal the baseline, and the head job read the manifest's `gs://` files for the new file check. MAKE_TRIPLET_DGE peaked at 605 MB.
 - The baseline (`tests/live_data/baseline`) was remade with the public `current` images in session 13: the same 16 files, identical in content to the
   earlier `jn_test` baseline (the old one was then deleted).
 - README has a workflow figure (Mermaid, rendered by GitHub; checked with `npx @mermaid-js/mermaid-cli`).
-- The session 13 work (branch `jn_simplify_dataflow`) is not committed yet.
+- The session 13 work is on branch `jn_simplify_dataflow`, in a PR to `main`.
 
 ## Work log
 
