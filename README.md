@@ -18,6 +18,7 @@ The main steps are:
 5. With donors: the donor by cell type report (`DONOR_CELL_TYPE_REPORT`) and the donor and donor by cell type metacells (`DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`).
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryTextColor": "#111111", "primaryBorderColor": "#333333", "lineColor": "#8a8a8a", "clusterBkg": "#f7f7fb", "clusterBorder": "#9a9ab8", "titleColor": "#111111"}}}%%
 flowchart TD
     manifest[/"manifest.yaml<br/>DGEs, donors, filters, joins"/]:::input
 
@@ -80,11 +81,13 @@ flowchart TD
     cell_type_metacells -.-> out_cell_type
     report -.-> out_report
 
-    classDef input fill:#eef3fb,stroke:#4a6fa5
-    classDef head fill:#fff6e0,stroke:#b8860b
-    classDef gate fill:#f4f4f4,stroke:#777777
-    classDef output fill:#eaf5ea,stroke:#3d7a3d
-    style per_library fill:#f7f7fb,stroke:#9a9ab8
+    classDef default fill:#ffffff,stroke:#333333,color:#111111
+    classDef input fill:#eef3fb,stroke:#4a6fa5,color:#111111
+    classDef head fill:#fff6e0,stroke:#b8860b,color:#111111
+    classDef gate fill:#f4f4f4,stroke:#777777,color:#111111
+    classDef output fill:#eaf5ea,stroke:#3d7a3d,color:#111111
+    style per_library fill:#f7f7fb,stroke:#9a9ab8,color:#111111
+    linkStyle default stroke:#8a8a8a
 ```
 
 Boxes are processes (each runs in a container); yellow steps run in the Nextflow head job; green cylinders are what is published to `--outdir`
