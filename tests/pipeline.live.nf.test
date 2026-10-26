@@ -10,7 +10,7 @@ nextflow_pipeline {
     // are the published files compared with the baseline made by the prototype script: equal md5 of the decompressed content first, and the
     // differing lines only to report a mismatch. Each wired edge adds its comparisons here.
     // The libraries are resolved in the workflow (LibraryResolver); the plain-text summary of what each library is processed from is checked below.
-    // Published: the merged results flat in the output directory, artifacts/ and tearsheets/ (per library) and pipeline_info/; the per-library
+    // Published: the merged results flat in the output directory, artifacts/, tearsheets/ and h5ad/ (per library) and pipeline_info/; the per-library
     // intermediates (library metrics, joined cell metadata, MapMyCells TSV, arguments file) are checked in the work directory.
 
     def compare = { String what, generated, baseline ->
@@ -48,13 +48,13 @@ nextflow_pipeline {
                 def workFiles = { String name -> def found = []; workDir.eachFileRecurse { if (it.name == name) found << it }; found }
                 def analysis = 'SMRI_V11.unfiltered'
 
-                // Published: the merged results, flat in the output directory, and two per-library records in directories of their own.
+                // Published: the merged results, flat in the output directory, and three per-library records in directories of their own.
                 // Nothing else is published: the top level has exactly these entries.
                 def mergedNames = ["${analysis}.library_metrics.txt", "${analysis}.cell_metadata.txt", 'matrix.mtx.gz', 'barcodes.tsv.gz', 'features.tsv.gz',
                     "${analysis}.donor_cell_type.txt", "${analysis}.donors.metacells.txt.gz",
                     "${analysis}.donor_cell_type.metacells.txt.gz"]
-                results['published: only the merged files, artifacts/, tearsheets/ and pipeline_info/'] =
-                    (out.list() as List).sort() == (mergedNames + ['artifacts', 'tearsheets', 'pipeline_info']).sort()
+                results['published: only the merged files, artifacts/, tearsheets/, h5ad/ and pipeline_info/'] =
+                    (out.list() as List).sort() == (mergedNames + ['artifacts', 'tearsheets', 'h5ad', 'pipeline_info']).sort()
 
                 // the metacells hold the output directory of the run in their first line, which is left out of the comparison
                 def body = { f -> LiveFiles.lines(f).findAll { !it.startsWith('#MakeMetacellsFromTripletDge') } }
@@ -103,6 +103,12 @@ nextflow_pipeline {
                     def tearsheet = "${lib}.standard_analysis_tearsheet.txt"
                     def generatedTearsheet = new File(out, "tearsheets/${tearsheet}")
                     results["tearsheets/${tearsheet}"] = generatedTearsheet.exists() && compare("tearsheets/${tearsheet}", generatedTearsheet, new File(root, "tearsheets/${tearsheet}"))
+                    // BUILD_LIBRARY_H5AD: h5ad/<library>.h5ad is published and is the baseline's, byte for byte (the file is binary: md5 of the bytes)
+                    def h5ad = "${lib}.h5ad"
+                    def generatedH5ad = new File(out, "h5ad/${h5ad}")
+                    def baselineH5ad = new File(root, "h5ad/${h5ad}")
+                    results["h5ad/${h5ad}: published, same md5 as the baseline"] = generatedH5ad.exists() && baselineH5ad.exists() &&
+                        LiveFiles.contentMd5(generatedH5ad) == LiveFiles.contentMd5(baselineH5ad)
                     // the library's metrics row names that library (its own artifact YAML reached the task); the file stays in the work directory
                     def metricsFiles = workFiles("${lib}.library_metrics.txt")
                     results["${lib}.library_metrics.txt: in the work directory, row is for ${lib}"] = !metricsFiles.isEmpty() &&

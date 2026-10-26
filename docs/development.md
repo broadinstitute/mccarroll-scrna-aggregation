@@ -69,14 +69,19 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **A process script block cannot read a staged path** (use a head-job `map` or pass text); `error()` inside an operator closure stops the run with that message.
 - **nf-test gives each run `output/` and `work/` side by side**; tests find per-library intermediates by walking `work/` (a task's file and the links to it).
 - **`git rm` refuses files with local modifications**. A `( ... &)` subshell finishes an agent command immediately: use a log file and a wait loop, or `run_in_background`.
+- **`conf/modules.config` also applies in module tests** (`nextflow.config` includes it), so a module test config must set `ext.args` itself (`BUILD_LIBRARY_H5AD`: `tests/nextflow.config` sets none, `uppercase.config` the pipeline's default).
+- **In nf-test, `file(...)` returns a `java.io.File`**: `.parent` is a String, use `.parentFile`. Do not name a helper in a test class `run`.
+- **Binary outputs (h5ad) are checked by running the image's tools with `docker run`** from the test, on a directory inside the repo (Docker cannot mount the scratchpad): `aggregate_filter_adata --view_columns`, `--view_values obs.<col>` and `--output-format 10x_mtx` (which sorts the genes by ID), and `h5py` through `/usr/local/dropseq/venv/dropseq/bin/python` for the HDF5 paths. Clear the export directory first: stale files would pass.
+- **h5ad and anndata 0.13:** pandas string columns are written as `nullable-string-array` groups (a mask and values) unless `anndata.settings.allow_write_nullable_strings` is off; `build_library_h5ad` turns it off. `sanitize_dataframe` turns a column whose non-missing values are all numbers into a number column (a donor `1` becomes a number) and makes a string column categorical only if it has fewer unique values than half the rows.
+- **The live pipeline test needs `GOOGLE_PROJECT_ID`** (`bican-um1-mccarroll`), or it stops at the credentials check. The public Drop-seq repo's default branch is `master`, not `main`: pull requests go to `master`.
 - **The `drop-seq_python` image has no `python3` on the PATH**; its Python is `/usr/local/dropseq/venv/dropseq/bin/python`.
-- **Mermaid figures (the README workflow figure) must not depend on the renderer's theme.** VSCode's Mermaid preview ignores the
+- **The README workflow figure** is `docs/figures/workflow.svg`, rendered from the Mermaid source `docs/figures/workflow.mmd` (GitHub cannot include one file in another, so the README embeds the SVG and links the source; it also draws the `.mmd` file on its own). After changing the source, run `docs/figures/render.sh` (it runs `npx @mermaid-js/mermaid-cli`; needs Node.js and network access the first time) and commit both files: nothing else regenerates the SVG. Keep the default HTML labels: with `htmlLabels: false` long process names wrap in the middle of a word.
+- **Mermaid figures must not depend on the renderer's theme.** VSCode's Mermaid preview ignores the
   `%%{init: ...themeVariables...}%%` line and uses its own dark theme in dark mode, but it does apply `classDef` and `style` lines. So give every node
   an explicit fill AND text color: `classDef default fill:#ffffff,stroke:#333333,color:#111111` for the nodes with no class, `color:#111111` in every
   other `classDef` and in each subgraph `style`, and `linkStyle default stroke:#8a8a8a` (gray lines show on black and on white). Without that, nodes
-  without a class get a dark fill under dark text. Check both cases before committing, with the init line removed for the dark one:
-  `npx -y @mermaid-js/mermaid-cli -i README.md -o out.md -e png -t dark -b '#111111'` and `... -t default -b white` (writes `out-1.png`; run it on a
-  copy in the scratchpad). Do not set `fontFamily`: the boxes are sized for another font and long names are cut off.
+  without a class get a dark fill under dark text. Check both cases before committing, with the init line removed (a copy in the scratchpad) for the dark one:
+  `npx -y @mermaid-js/mermaid-cli -i <file>.mmd -o dark.png -t dark -b '#111111'` and `... -o light.png -b white`. Do not set `fontFamily`: the boxes are sized for another font and long names are cut off.
 
 ## Ground rules (from the user)
 
@@ -112,12 +117,13 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **Summary for people:** `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`, plain text (reference, reduced GTF, donors, per library the DGE, cell metadata, MapMyCells, extra files and arguments); nothing reads it back.
 - **Publishing (explicit: the `output` block and `publish:` in `main.nf`; nothing is published unless listed; module tests run one process and publish nothing):** merged results FLAT in `--outdir` (`<analysis>.library_metrics.txt`,
   `<analysis>.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `<analysis>.donor_cell_type.txt`, `<analysis>.donors.metacells.txt.gz`, `<analysis>.donor_cell_type.metacells.txt.gz`); per-library records in directories (`artifacts/<uei>.yaml`,
-  `tearsheets/<uei>.standard_analysis_tearsheet.txt`); `pipeline_info/`. Per-library library metrics, joined cell metadata, MapMyCells TSV and args files stay in the work directory.
+  `tearsheets/<uei>.standard_analysis_tearsheet.txt`, `h5ad/<uei>.h5ad`); `pipeline_info/`. Per-library library metrics, joined cell metadata, MapMyCells TSV and args files stay in the work directory.
 - **Containers:** hard coded in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (both public; both checked to contain every tool and option the
   modules use). No image parameters. nf-test runs cap memory at 4 GB in `tests/nextflow.config`.
 - **Reduced GTF:** staged from `gs://` (340 MB) in the live test; no override parameter was added.
 - **Parameters:** `--manifest`, `--analysis_id` (letters, digits, `.`, `_`, `-`), `--outdir`, `--mmc_model`, `--mmc_level`, `--gcp_credentials_file`.
-- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), `tests/pipeline.synthetic.nf.test` (3 workflow tests on synthetic local libraries), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
+- **Per-library h5ad (session 14):** `BUILD_LIBRARY_H5AD` runs for every library after its cell metadata is built (input: the library's cell metadata, the manifest DGE and the reduced GTF), with `ext.args = '--uppercase-column cell_barcode'` (`conf/modules.config`) because the downstream reader requires `obs/CELL_BARCODE`; the pipeline's own files keep `cell_barcode`. Required by that reader (`h5ad-required-fields.tsv`): `X` as CSR, `obs/CELL_BARCODE`, `var/gene_symbol`; `obs/star_IsCell` must not exist; the other fields are optional or readable and need nothing.
+- **Tests:** one `main.nf.test` per module (fixtures self-contained, never shared), `tests/pipeline.synthetic.nf.test` (9 workflow tests on synthetic local libraries), live tests compare with the baseline, `tests/pipeline.live.nf.test` (2 tests: the whole pipeline vs the baseline incl. the
   exact top-level listing of `--outdir`, per-library intermediates in the work directory, every task in a public `current` image; and a resolver error stopping the run) and `tests/pipeline.validation.nf.test`.
 
 ## Environment
@@ -126,8 +132,8 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
   `tests/live_data/baseline/tmp/` into its `tmp/` to skip the 340 MB download). Read a tool's source with
   `docker run --rm --platform linux/amd64 --entrypoint cat <image> <path>` (python tools are under `/usr/local/dropseq/venv/dropseq/lib/python3.13/site-packages/dropseq/`; the Python source of the
   aggregation tools is in `/Users/nemesh/dropseqrna/transcriptome_java/public/src/python/src/dropseq/aggregation/`); the images run under emulation on this arm64 Mac, so allow time.
-- nextflow 26.10.0, nf-test 0.9.5, docker (default nf-test profile `docker,test`). Images (linux/amd64, pulled by Docker): `quay.io/broadinstitute/drop-seq_python:current` (digest `f28d971a...`) and
-  `quay.io/broadinstitute/drop-seq_java:current` (digest `e3230deb...`), checked on 2026-10-19.
+- nextflow 26.10.0, nf-test 0.9.5, docker (default nf-test profile `docker,test`). Images (linux/amd64, pulled by Docker): `quay.io/broadinstitute/drop-seq_python:current` (image `e62c02daf515`, with `build_library_h5ad --uppercase-column`, checked on 2026-10-26) and
+  `quay.io/broadinstitute/drop-seq_java:current` (digest `e3230deb...`, checked on 2026-10-19).
 - `GOOGLE_PROJECT_ID=bican-um1-mccarroll` (not a secret). The baseline is `tests/live_data/baseline` (git-ignored), made by the prototype script on `tests/live_data/manifest.yaml`; the command is in `../testing.md`.
 
 ## Google Batch and Seqera (settled in sessions 7 to 11; details and commands in [credentials.md](credentials.md))

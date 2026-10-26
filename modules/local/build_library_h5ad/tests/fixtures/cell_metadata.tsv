@@ -1,0 +1,4 @@
+PREFIX	cell_barcode	donor	num_retained_transcripts	pct_mt	cell_type
+LIB_A	GGGG	D1	3	0.01	neuron
+LIB_A	AAAA	D2	3	0.02	NA
+LIB_A	TTTT	D1	7	NA	glia

@@ -64,6 +64,11 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
                                        --args-file <lib>.join_and_filter_args.txt
                                 out: <lib>.joined_filtered_cell_metadata.txt
                |
+               +--> [process] BUILD_LIBRARY_H5AD   (built joined with libraries on id, for the manifest DGE; the reduced GTF from the resolver; 6 GB default)
+               |                in : id, dge, cell_metadata (= <lib>.joined_filtered_cell_metadata.txt), reduced_gtf
+               |                cmd: build_library_h5ad --dge --cell-metadata --reduced-gtf --output h5ad/<lib>.h5ad
+               |                out: h5ad/<lib>.h5ad ==> h5ad/   (X = raw counts, obs = cell metadata indexed <lib>_<barcode> with CELL_BARCODE (ext.args --uppercase-column cell_barcode), var = gene IDs + gene_symbol)
+               |
                +--> ONE sorted list of the built libraries (id, analysis_id, position, cell metadata, DGE = the manifest DGE), in manifest order (position)
                         |--> [process] MERGE_CELL_METADATA (alias of MERGE_LIBRARY_METADATA; --index-col PREFIX --index-col cell_barcode) -> <analysis>.cell_metadata.txt ==> flat in outdir
                         |--> [process] MAKE_TRIPLET_DGE (prefixes, DGEs, barcode lists in that order; reduced GTF from the resolver; 15 GB)

@@ -11,4 +11,4 @@ The mccarroll/scrna-aggregation documentation is split into the following pages:
 - [Testing](testing.md)
   - How to run the unit, synthetic-pipeline and live tests, the baseline, and what each test checks.
 - [Development](development.md)
-  - Coding conventions and known pitfalls.
+  - Coding conventions and known pitfalls, and how to regenerate the README workflow figure (`figures/render.sh`).

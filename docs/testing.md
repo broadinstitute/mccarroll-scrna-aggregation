@@ -26,9 +26,9 @@ Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the re
 | Unit tests of one module | Docker (the public images; `WRITE_TEXT_FILE` needs nothing) | `nf-test test modules/local/<module>/tests/main.nf.test` |
 | Pipeline tests on synthetic libraries (9) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
 | Pipeline input validation and `--help` (6) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
-| Live tests (11) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
+| Live tests (12) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
 | Whole pipeline on Google Batch (a script, not an nf-test; costs a little money) | `nextflow`, `gsutil`, Application Default Credentials, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION` and the baseline | `tests/batch_full_run/run.sh` (see [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)) |
-| Everything: 110 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
+| Everything: 118 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
 
 To run less: add the ID nf-test prints in brackets to select one test (`...main.nf.test@14bbfafa`; the ID changes if the test is renamed), `--dry-run` to list what would run, or select by tag (`live`, `gcs`, `pipeline_synthetic`). A plain `nf-test test` also runs the live tests, which fail without the baseline, so use the script or select by path. `nf-test.config` sets the default profile to `docker,test`. Test output goes to `.nf-test/` (git-ignored).
 
@@ -48,6 +48,7 @@ One line per unit; the fixtures and the exact assertions are in each unit's `tes
 | `MERGE_LIBRARY_METADATA` | 4 | rows kept in input order; columns are united; with `--index-col`, a duplicate (`PREFIX`, `cell_barcode`) fails |
 | `FORMAT_MAPMYCELLS_ANNOTATIONS` | 4 | columns are prefixed; the cell type column is the top taxonomy level or the one requested with `--level`; a bad level fails |
 | `BUILD_LIBRARY_CELL_METADATA` | 6 | `PREFIX` first; the MapMyCells left join; donor, filters and an extra joined file from the arguments file; awkward argument values are applied as written |
+| `BUILD_LIBRARY_H5AD` | 7 (6 and the live test) | cell names `<id>_<barcode>` in the cell metadata order with the bare barcode kept; counts of the DGE for the kept cells only; gene IDs from the reduced GTF with `gene_symbol`; missing values encoded; `CELL_BARCODE` with `--uppercase-column`; the fields the downstream reader requires (CSR `X`, plain string arrays, no `star_IsCell`); `id` and `h5ad/<id>.h5ad`. The h5ad is read with `aggregate_filter_adata` and `h5py` in the image, run with `docker` by the test |
 | `MAKE_TRIPLET_DGE` | 4 | prefixed barcodes in library order; only the cells in each barcode list; features; a duplicate barcode fails |
 | `DONOR_CELL_TYPE_REPORT` | 3 | counts, fractions and medians per donor and cell type; cells without a donor or cell type are handled as documented; a missing column fails |
 | `MAKE_METACELLS_FROM_TRIPLET_DGE` | 5 | sums per donor, and per donor and cell type; unmatched cells are in no metacell; the same barcode in two libraries stays separate; an unknown column fails |
@@ -171,7 +172,7 @@ export GOOGLE_PROJECT_ID=bican-um1-mccarroll
 Then run either:
 
 ```bash
-tests/run_all_tests.sh        # everything (110 tests); stops before starting Docker if the project ID, credentials file, nf-test or baseline is missing
+tests/run_all_tests.sh        # everything (118 tests); stops before starting Docker if the project ID, credentials file, nf-test or baseline is missing
 nf-test test --tag live       # only the live tests (11), with no pre-checks
 ```
 
@@ -184,11 +185,12 @@ One file per module, each running every library in the baseline:
 | `locate_scrna_artifacts/tests/gcs.nf.test` | network, ADC | `LOCATE_SCRNA_ARTIFACTS` on the manifest's real `gs://` DGEs | each `artifacts/<library>.yaml` |
 | `summarize_scrna_experiments/tests/gcs.nf.test` | network, ADC | `SUMMARIZE_SCRNA_EXPERIMENTS` on every `artifacts/<library>.yaml` | `artifacts/<library>.library_metrics.txt` and `tearsheets/<library>.standard_analysis_tearsheet.txt` |
 | `merge_library_metadata/tests/live.nf.test` (2 tests) | baseline | `MERGE_LIBRARY_METADATA` on the per-library metrics, and on the per-library cell metadata with `--index-col PREFIX --index-col cell_barcode` | `<analysis>.library_metrics.txt` and `<analysis>.cell_metadata.txt` |
+| `build_library_h5ad/tests/live.nf.test` | baseline | `BUILD_LIBRARY_H5AD` (with the pipeline's default `--uppercase-column cell_barcode`) on the baseline's local DGE (`tmp/<library>/`), `<library>.joined_filtered_cell_metadata.txt` and the reduced GTF in `tmp/` | `h5ad/<library>.h5ad`, by md5 of the bytes (the file is binary; the md5 holds while the image's python libraries do, so after an image update check the content with `aggregate_filter_adata --view_columns` and `--view_values` before remaking the baseline) |
 | `make_triplet_dge/tests/live.nf.test` | baseline | `MAKE_TRIPLET_DGE` on the baseline's local DGE copies (`tmp/<library>/`) and `<library>.joined_filtered_cell_metadata.txt` barcode lists | `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz` (decompressed content; 104,322 matrix lines for the current baseline) |
 | `make_metacells_from_triplet_dge/tests/live.nf.test` | baseline | `MAKE_METACELLS_FROM_TRIPLET_DGE` on the baseline's matrix, features, barcodes and `<analysis>.cell_metadata.txt`, grouped by `donor` and by `donor` + the column in `<analysis>.cell_type_column.txt` | `<analysis>.donors.metacells.txt.gz` and `<analysis>.donor_cell_type.metacells.txt.gz`, without the `#MakeMetacellsFromTripletDge` header line (it holds absolute paths) |
 | `donor_cell_type_report/tests/live.nf.test` | baseline | `DONOR_CELL_TYPE_REPORT` on `<analysis>.cell_metadata.txt` with the column named in the baseline's `<analysis>.cell_type_column.txt` (written by the prototype since 2026-10-16: remake an older baseline; the pipeline itself no longer publishes this file) | `<analysis>.donor_cell_type.txt` |
 
-The last four need no network or credentials, but they read files that only the baseline has, so they also need step 1. `run_date` and `run_status` come from the newest Nextflow trace in the bucket, so a newer run of a library makes those two columns differ from an older baseline.
+The last five need no network or credentials, but they read files that only the baseline has, so they also need step 1. `run_date` and `run_status` come from the newest Nextflow trace in the bucket, so a newer run of a library makes those two columns differ from an older baseline.
 
 To run one live test by hand, pass its file to `nf-test test`, for example:
 
@@ -199,8 +201,8 @@ GOOGLE_PROJECT_ID=bican-um1-mccarroll nf-test test modules/local/summarize_scrna
 ### Whole-pipeline live test
 
 `tests/pipeline.live.nf.test` (2 tests) runs the whole pipeline once on the live manifest and, only if it succeeded, compares each published file with the baseline (md5 of the decompressed content; mismatching lines are printed).
-- The top level of `--outdir` has exactly the merged results, `artifacts/`, `tearsheets/` and `pipeline_info/`.
-- Every merged result equals the baseline's (the metacell files without their `#MakeMetacellsFromTripletDge` line), as do `artifacts/<uei>.yaml` and `tearsheets/`.
+- The top level of `--outdir` has exactly the merged results, `artifacts/`, `tearsheets/`, `h5ad/` and `pipeline_info/`.
+- Every merged result equals the baseline's (the metacell files without their `#MakeMetacellsFromTripletDge` line), as do `artifacts/<uei>.yaml` and `tearsheets/`; `h5ad/<uei>.h5ad` has the baseline's md5.
 - The per-library intermediates in the run's work directory (library metrics, joined cell metadata, arguments file, MapMyCells TSV) are correct.
 - `pipeline_info/<analysis>.resolved_libraries.txt` names the right DGE, cell metadata, model, annotations and reduced GTF, and `Donors: yes`.
 - A second test sets `--analysis_id` to the library id and expects the run to stop with the resolver's message before SUMMARIZE, FORMAT or BUILD run.
@@ -232,7 +234,7 @@ The script uses `<base>/work` as the work directory and `<base>/out` as `--outdi
 ### What it checks (each prints PASS or FAIL; the exit status is the number of failures, 1 if the run itself failed, 2 if a prerequisite is missing)
 
 1. Each of the eight merged files equals the baseline (md5 of the decompressed content; the metacell files without their `#MakeMetacellsFromTripletDge` line). `artifacts/` and `tearsheets/` are not compared here (the nf-test live test does that locally).
-2. The top level of `--outdir` is exactly the merged files, `artifacts/`, `tearsheets/` and `pipeline_info/`.
+2. The top level of `--outdir` is exactly the merged files, `artifacts/`, `tearsheets/`, `h5ad/` and `pipeline_info/`; each `h5ad/<library>.h5ad` has the md5 of the baseline's.
 3. The `WRITE_*` exec processes ran in the head job (`native_id` is `-` in the trace) and every other task was submitted to Google Batch.
 4. Every task is `COMPLETED`, and every Google Batch task ran in a public `quay.io/broadinstitute/drop-seq_python` or `drop-seq_java` image.
 
@@ -240,7 +242,7 @@ It then prints one line per task: the requested memory, `peak_rss` and `realtime
 
 ### Last result (2026-10-21, `mccarroll-scrna-seq`, `us-central1`, with the exact machine types)
 
-All 12 checks passed (the 8 merged files equal the baseline, the top-level listing, `WRITE_*` in the head job, every task `COMPLETED` in the public images). The log had no Cloud Info deprecation warning and no "cannot be executed by 'google-batch' executor" warning. The Google Batch jobs used `n1-standard-2` for the default processes and `n1-standard-8` for the three Java steps (read back with `gcloud batch jobs describe`). Peak memory was 611 MB for `MAKE_TRIPLET_DGE`, about 130 MB for the metacell steps and under 200 MB for the others (requests: 15 GB for the Java steps, 6 GB for the rest), and each task ran for 2 to 9 seconds.
+All 12 checks passed on the session 13 code, before the h5ad check was added (the 8 merged files equal the baseline, the top-level listing, `WRITE_*` in the head job, every task `COMPLETED` in the public images). The log had no Cloud Info deprecation warning and no "cannot be executed by 'google-batch' executor" warning. The Google Batch jobs used `n1-standard-2` for the default processes and `n1-standard-8` for the three Java steps (read back with `gcloud batch jobs describe`). Peak memory was 611 MB for `MAKE_TRIPLET_DGE`, about 130 MB for the metacell steps and under 200 MB for the others (requests: 15 GB for the Java steps, 6 GB for the rest), and each task ran for 2 to 9 seconds.
 
 ### Things that can go wrong
 

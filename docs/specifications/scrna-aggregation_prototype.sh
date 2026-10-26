@@ -220,6 +220,18 @@ jv MakeTripletDge -m "$JAVA_MEMORY" TMP_DIR="$TMP_DIR" VALIDATION_STRINGENCY=SIL
   MANIFEST="$TRIPLET_MANIFEST" REDUCED_GTF="$reduced_gtf_local"
 
 # ---------------------------------------------------------------------------------------------------------------
+# 5b. h5ad file of each library, in OUT_DIR/h5ad: the counts of its DGE for the cells of its cell metadata, with the
+#     cell metadata as obs (indexed by <library>_<cell barcode>, so that the files can be combined) and the genes of
+#     the reduced GTF as var (indexed by gene ID, with the gene symbol as a column).  The cell_barcode column of obs is written as
+#     CELL_BARCODE, which the readers of these files require
+# ---------------------------------------------------------------------------------------------------------------
+mkdir -p "$OUT_DIR/h5ad"
+for i in "${!LIBRARIES[@]}"; do
+  py build_library_h5ad --dge "${LOCAL_DGES[$i]}" --cell-metadata "${LIBRARY_METADATA_FILES[$i]}" \
+    --reduced-gtf "$reduced_gtf_local" --uppercase-column cell_barcode --output "$OUT_DIR/h5ad/${LIBRARIES[$i]}.h5ad"
+done
+
+# ---------------------------------------------------------------------------------------------------------------
 # 6. Combine the cell metadata of the libraries
 # ---------------------------------------------------------------------------------------------------------------
 CELL_METADATA=$PREFIX.cell_metadata.txt

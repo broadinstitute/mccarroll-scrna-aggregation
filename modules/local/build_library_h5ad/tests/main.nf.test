@@ -1,0 +1,271 @@
+nextflow_process {
+
+    name "Test Process BUILD_LIBRARY_H5AD"
+    script "modules/local/build_library_h5ad/main.nf"
+    process "BUILD_LIBRARY_H5AD"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "build_library_h5ad"
+
+    // Contract: record(id: String, dge: Path, cell_metadata: Path), reduced_gtf: Path
+    //           -> h5ad: record(id: String, h5ad: Path 'h5ad/<ext.prefix ?: id>.h5ad').
+    // ext.args: none in nextflow.config; the pipeline's default, --uppercase-column cell_barcode, is in uppercase.config (named by the tests that need it).
+    // The h5ad is read with the tools of the same image (aggregate_filter_adata: --view_columns, --view_values and an export of the matrix as 10x
+    // files, which sorts the genes by gene ID), run with docker on the output directory. The h5ad is a binary file that Groovy cannot read.
+    // Fixtures: tests/fixtures/README.md (the expected cells, counts and genes are worked out there). The live comparison is in live.nf.test.
+
+    // Runs aggregate_filter_adata (with the arguments in args) in the image, on the directory with the h5ad file(s). exportDir (a directory in the
+    // repository, which Docker can mount) gets the output. Returns the output text (stdout and stderr) and fails the test if the tool fails.
+    def aggregateFilterAdata = { File h5adDir, File exportDir, List args ->
+        exportDir.deleteDir()   // nothing from an earlier run may be read back
+        exportDir.mkdirs()
+        def uid = 'id -u'.execute().text.trim()
+        def gid = 'id -g'.execute().text.trim()
+        def command = ['docker', 'run', '--rm', '--platform', 'linux/amd64', '--user', "${uid}:${gid}".toString(), '-e', 'HOME=/tmp',
+            '-v', "${h5adDir}:/h5ad:ro".toString(), '-v', "${exportDir}:/export".toString(),
+            'quay.io/broadinstitute/drop-seq_python:current', 'aggregate_filter_adata', '--dir', '/h5ad'] + args
+        def process = command.execute()
+        def out = new StringBuffer()
+        def err = new StringBuffer()
+        process.consumeProcessOutput(out, err)
+        process.waitFor()
+        assert process.exitValue() == 0 : "aggregate_filter_adata failed: ${err}"
+        return out.toString() + '\n' + err.toString()
+    }
+    def viewValues = { File h5adDir, File exportDir, String column -> aggregateFilterAdata(h5adDir, exportDir, ['--view_values', column]) }
+    // The HDF5 object at each path of the h5ad directory's file (LIB_A.h5ad), read with h5py in the image: path -> [type, encoding-type], or 'absent'.
+    def h5adObjects = { File h5adDir, List paths ->
+        def uid = 'id -u'.execute().text.trim()
+        def gid = 'id -g'.execute().text.trim()
+        def script = "import h5py, sys\nf = h5py.File('/h5ad/LIB_A.h5ad')\n" +
+            "for p in sys.argv[1:]:\n    o = f[p] if p in f else None\n    print(p, 'absent' if o is None else (type(o).__name__ + ' ' + str(o.attrs.get('encoding-type'))))\n"
+        def command = ['docker', 'run', '--rm', '--platform', 'linux/amd64', '--user', "${uid}:${gid}".toString(), '-e', 'HOME=/tmp',
+            '-v', "${h5adDir}:/h5ad:ro".toString(), 'quay.io/broadinstitute/drop-seq_python:current',
+            '/usr/local/dropseq/venv/dropseq/bin/python', '-c', script] + paths
+        def process = command.execute()
+        def out = new StringBuffer()
+        def err = new StringBuffer()
+        process.consumeProcessOutput(out, err)
+        process.waitFor()
+        assert process.exitValue() == 0 : "reading the h5ad failed: ${err}"
+        out.toString().readLines().collectEntries { line -> def parts = line.split(' ', 2); [(parts[0]): parts[1]] }
+    }
+    // the lines of a 10x export file (.tsv.gz or .mtx.gz) as lists of columns, without comment lines
+    def exportLines = { File f ->
+        new java.util.zip.GZIPInputStream(new FileInputStream(f)).withCloseable { s -> s.newReader().readLines() }
+            .findAll { !it.startsWith('%') }.collect { it.split('\t| ') as List }
+    }
+    // exports the matrix of the h5ad directory as 10x files into exportDir/mtx
+    def export10x = { File h5adDir, File exportDir ->
+        aggregateFilterAdata(h5adDir, exportDir, ['--output', '/export/mtx', '--output-format', '10x_mtx'])
+        [ barcodes: exportLines(new File(exportDir, 'mtx/barcodes.tsv.gz')),
+          features: exportLines(new File(exportDir, 'mtx/features.tsv.gz')),
+          matrix: exportLines(new File(exportDir, 'mtx/matrix.mtx.gz')) ]
+    }
+
+    test("Should name the cells <id>_<barcode> in the order of the cell metadata and keep the bare barcode as a column") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def exportDir = new File("${projectDir}/.nf-test/build_library_h5ad_view/names".toString())
+            def columns = process.success ? aggregateFilterAdata(h5ad.parentFile, exportDir, ['--view_columns']) : ''
+            def barcodeValues = process.success ? viewValues(h5ad.parentFile, exportDir, 'obs.cell_barcode') : ''
+            def mtx = process.success ? export10x(h5ad.parentFile, exportDir) : [barcodes: []]
+            assertAll(
+                { assert process.success },
+                // the cell metadata columns, PREFIX and the bare cell_barcode among them, and the one var column
+                { assert columns.contains('Unique obs columns:\nPREFIX\ncell_barcode\ncell_type\ndonor\nnum_retained_transcripts\npct_mt\n') },
+                { assert barcodeValues.contains("'GGGG': 1") && barcodeValues.contains("'AAAA': 1") && barcodeValues.contains("'TTTT': 1") },
+                // <id>_<barcode>, in the order of the cell metadata (GGGG, AAAA, TTTT), not that of the DGE columns (AAAA, CCCC, GGGG, TTTT);
+                // CCCC is not in the cell metadata, so it is not in the file
+                { assert mtx.barcodes.collect { it[0] } == ['LIB_A_GGGG', 'LIB_A_AAAA', 'LIB_A_TTTT'] }
+            )
+        }
+    }
+
+    test("Should write the counts of the DGE for the cells of the cell metadata only, with each count for its own cell and gene") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def exportDir = new File("${projectDir}/.nf-test/build_library_h5ad_view/counts".toString())
+            def mtx = process.success ? export10x(h5ad.parentFile, exportDir) : [matrix: [], features: []]
+            // (gene, cell, count) triplets of the matrix, 1-based, with genes in the order of the features and cells in the order of the barcodes
+            def triplets = mtx.matrix.drop(1).collect { it as List }.sort { a, b -> a[1] as int <=> b[1] as int ?: a[0] as int <=> b[0] as int }
+            assertAll(
+                { assert process.success },
+                // 3 genes x 3 cells, 4 non-zero counts: GENEB is zero everywhere (it stays a gene), and the 5 of CCCC (filtered out) is not there
+                { assert mtx.matrix.take(1) == [['3', '3', '4']] },
+                // genes ENSG01 (GENEA) = 1, ENSG03 (GENEC) = 3; cells GGGG = 1, AAAA = 2, TTTT = 3:
+                // GGGG: GENEA 3 | AAAA: GENEA 1, GENEC 2 | TTTT: GENEC 7
+                { assert triplets == [['1', '1', '3'], ['1', '2', '1'], ['3', '2', '2'], ['3', '3', '7']] }
+            )
+        }
+    }
+
+    test("Should index the genes by the gene IDs of the reduced GTF and keep the gene symbols in a gene_symbol column") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def exportDir = new File("${projectDir}/.nf-test/build_library_h5ad_view/genes".toString())
+            def columns = process.success ? aggregateFilterAdata(h5ad.parentFile, exportDir, ['--view_columns']) : ''
+            def symbols = process.success ? viewValues(h5ad.parentFile, exportDir, 'var.gene_symbol') : ''
+            def mtx = process.success ? export10x(h5ad.parentFile, exportDir) : [features: []]
+            assertAll(
+                { assert process.success },
+                // the only var column is gene_symbol; the index is the gene ID
+                { assert columns.contains('Unique var columns:\ngene_symbol\n') },
+                // one gene per gene of the DGE: GENEA once although the GTF has a gene and an exon row for it, and not GENED (not in the DGE)
+                { assert symbols.contains('(3 values)') },
+                { assert symbols.contains("'GENEA': 1") && symbols.contains("'GENEB': 1") && symbols.contains("'GENEC': 1") && !symbols.contains('GENED') },
+                // ENSG01 to ENSG03, so the gene IDs of GENEA to GENEC (the export sorts the genes by gene ID)
+                { assert mtx.features.collect { it[0] } == ['ENSG01', 'ENSG02', 'ENSG03'] }
+            )
+        }
+    }
+
+    test("Should encode missing values in the cell metadata so that they can be read back") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def exportDir = new File("${projectDir}/.nf-test/build_library_h5ad_view/missing".toString())
+            // cell_type has NA in AAAA: a category 'NA'. pct_mt has NA in TTTT: a number column with a missing value (3 values, but the
+            // summary is of the 2 numbers, so the missing one was not turned into text, which would make the column a category)
+            def cellTypes = process.success ? viewValues(h5ad.parentFile, exportDir, 'obs.cell_type') : ''
+            def pctMt = process.success ? viewValues(h5ad.parentFile, exportDir, 'obs.pct_mt') : ''
+            assertAll(
+                { assert process.success },
+                { assert cellTypes.contains("'neuron': 1") && cellTypes.contains("'glia': 1") && cellTypes.contains("'NA': 1") },
+                { assert pctMt.contains('Summary for obs.pct_mt (3 values):') },
+                { assert pctMt.contains('min:    0.01') && pctMt.contains('max:    0.02') && pctMt.contains('mean:   0.015') }
+            )
+        }
+    }
+
+    test("Should write the cell barcode column as CELL_BARCODE when --uppercase-column cell_barcode is given, and keep the cell names") {
+
+        config "./uppercase.config"
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def exportDir = new File("${projectDir}/.nf-test/build_library_h5ad_view/uppercase".toString())
+            def columns = process.success ? aggregateFilterAdata(h5ad.parentFile, exportDir, ['--view_columns']) : ''
+            def barcodeValues = process.success ? viewValues(h5ad.parentFile, exportDir, 'obs.CELL_BARCODE') : ''
+            def mtx = process.success ? export10x(h5ad.parentFile, exportDir) : [barcodes: []]
+            assertAll(
+                { assert process.success },
+                // CELL_BARCODE instead of cell_barcode; the other columns are as they were
+                { assert columns.contains('Unique obs columns:\nCELL_BARCODE\nPREFIX\ncell_type\ndonor\nnum_retained_transcripts\npct_mt\n') },
+                { assert barcodeValues.contains("'GGGG': 1") && barcodeValues.contains("'AAAA': 1") && barcodeValues.contains("'TTTT': 1") },
+                // the cell names (the index) do not change
+                { assert mtx.barcodes.collect { it[0] } == ['LIB_A_GGGG', 'LIB_A_AAAA', 'LIB_A_TTTT'] }
+            )
+        }
+    }
+
+    test("Should write the fields the downstream reader requires: CSR X, obs/CELL_BARCODE and var/gene_symbol as plain string arrays, and no star_IsCell") {
+
+        config "./uppercase.config"
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            def h5ad = file(process.out.h5ad[0].h5ad)
+            def paths = ['X', 'X/data', 'X/indices', 'X/indptr', 'var/gene_symbol', 'var/gene_ids', 'obs/CELL_BARCODE', 'obs/cell_barcode', 'obs/_index',
+                'obs/PREFIX', 'obs/star_IsCell']
+            def objects = process.success ? h5adObjects(h5ad.parentFile, paths) : [:]
+            assertAll(
+                { assert process.success },
+                // required: X as a CSR matrix (data, indices, indptr)
+                { assert objects['X'] == 'Group csr_matrix' },
+                { assert objects['X/data'].startsWith('Dataset') && objects['X/indices'].startsWith('Dataset') && objects['X/indptr'].startsWith('Dataset') },
+                // required: var/gene_symbol and obs/CELL_BARCODE are datasets of strings, not the nullable string arrays (a group with a mask and values)
+                { assert objects['var/gene_symbol'] == 'Dataset string-array' },
+                { assert objects['obs/CELL_BARCODE'] == 'Dataset string-array' },
+                // readable: the gene IDs and the cell names, as plain strings too; the library as a category
+                { assert objects['var/gene_ids'] == 'Dataset string-array' },
+                { assert objects['obs/_index'] == 'Dataset string-array' },
+                { assert objects['obs/PREFIX'] == 'Group categorical' },
+                // the lower case name is gone, and the field that must not exist is not there
+                { assert objects['obs/cell_barcode'] == 'absent' },
+                { assert objects['obs/star_IsCell'] == 'absent' }
+            )
+        }
+    }
+
+    test("Should propagate the id and write h5ad/<id>.h5ad") {
+
+        when {
+            process {
+                """
+                input[0] = record(id: 'LIB_A', dge: file("${moduleDir}/tests/fixtures/dge.txt"), cell_metadata: file("${moduleDir}/tests/fixtures/cell_metadata.tsv"))
+                input[1] = file("${moduleDir}/tests/fixtures/reduced.gtf")
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.h5ad.size() == 1 },
+                // id propagated; name from id, in a directory h5ad (the published place, see main.nf output)
+                { assert process.out.h5ad[0].id == 'LIB_A' },
+                { assert file(process.out.h5ad[0].h5ad).name == 'LIB_A.h5ad' },
+                { assert file(process.out.h5ad[0].h5ad).parentFile.name == 'h5ad' },
+                { assert file(process.out.h5ad[0].h5ad).size() > 0 }
+            )
+        }
+    }
+}
