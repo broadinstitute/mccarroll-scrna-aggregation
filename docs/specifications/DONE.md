@@ -10,10 +10,25 @@ The pipeline produces the baseline result locally (docker), on Google Batch (`-p
   Credentials and the baseline in `tests/live_data/baseline`, see `../testing.md`). `nextflow lint .` is clean (50 files, no errors or warnings).
 - **Google Batch:** `tests/batch_full_run/run.sh` passed 12 of 12 checks on the session 13 code (project `mccarroll-scrna-seq`, `us-central1`): the
   published files equal the baseline, and the head job read the manifest's `gs://` files for the new file check. MAKE_TRIPLET_DGE peaked at 605 MB.
-- The baseline (`tests/live_data/baseline`) was remade with the public `current` images in session 13: the same 16 files, identical in content to the
+- The baseline (`tests/live_data/baseline`) was remade with the public `current` images in session 13: the same 16 files (session 14 added `h5ad/<library>.h5ad`), identical in content to the
   earlier `jn_test` baseline (the old one was then deleted).
-- README has a workflow figure (Mermaid, rendered by GitHub; checked with `npx @mermaid-js/mermaid-cli`).
-- The session 13 work is on branch `jn_simplify_dataflow`, in a PR to `main`.
+- README has a workflow figure (since session 14 `docs/figures/workflow.svg`, rendered from `docs/figures/workflow.mmd`; see `../development.md`).
+- The session 13 work was merged to `main` (PR #4); the git tag `prod` is on its merge commit `d76e217`.
+
+## Session 14: per-library h5ad files (done)
+
+- **Python tool:** `build_library_h5ad` (public repo, `dropseq.aggregation.build_library_h5ad`, in the `drop-seq_python:current` image): the counts of a DGE for the cells of a
+  cell metadata file, `obs` = the cell metadata indexed `<PREFIX>_<cell barcode>`, `var` = gene IDs (`gene_ids`) + `gene_symbol` from the reduced GTF (optional: without it `var` is
+  indexed by the DGE gene symbols), `obs` and `var` sanitized with `aggregate_filter_adata.sanitize_dataframe`. The DGE is read one gene at a time into numpy arrays
+  (a 6,000 x 20,000 synthetic DGE peaked at 0.6 GB; the first version with Python lists, 1.5 GB). Layout modelled on the CAP freeze files.
+- **Downstream format (`h5ad-required-fields.tsv`):** `obs/CELL_BARCODE`, `var/gene_symbol` and `X` (CSR) are required, `star_IsCell` must not exist, the rest is optional or readable. The tool has `--uppercase-column` (the pipeline default is `cell_barcode` in `conf/modules.config`) and writes plain string arrays (anndata 0.13 writes nullable string groups otherwise); public PR #592. The module tests read the HDF5 paths in the image.
+- **Prototype script:** step 5b, after the reduced GTF is localized, writes `OUT_DIR/h5ad/<library>.h5ad`. The baseline was remade with it (the other files are identical).
+- **Pipeline:** module `BUILD_LIBRARY_H5AD` (5 module tests that read the h5ad with `aggregate_filter_adata` in the image, and a live md5 test), wired as one edge in the workflow
+  (`built` joined with the manifest DGE, plus the reduced GTF), published to `h5ad/`. The synthetic and live pipeline tests and the Google Batch check script check `h5ad/`.
+- `sanitize_dataframe` turns a column whose non-missing values are all numbers into a number column, so a numeric donor id (`1`) becomes a number. Donor ids like `N3` are unaffected.
+- **Checked in session 14:** `nextflow lint .` clean (53 files); h5ad module tests 8 of 8 (7 module, 1 live), synthetic pipeline tests 9 of 9, live pipeline tests 2 of 2 (with `GOOGLE_PROJECT_ID`), all against the remade baseline. The whole suite (118 tests) and the Google Batch script were **not** run. Nothing of the Nextflow work is committed.
+- **Public repo (`Drop-seq`, default branch `master`):** the tool came in with #590 (first version) and #591 (memory: numpy arrays instead of Python lists, 1.5 GB to 0.6 GB on a 6,000 x 20,000 synthetic DGE); #592 (merged) added `--uppercase-column` and plain string arrays. The downstream field list (`h5ad-required-fields.tsv`) needs `X` as CSR, `obs/CELL_BARCODE` and `var/gene_symbol`; fields that are optional or readable need nothing.
+- README figure moved out of the README: `docs/figures/workflow.mmd` (source, with the `h5ad` step) and `docs/figures/workflow.svg` (embedded in the README).
 
 ## Work log
 

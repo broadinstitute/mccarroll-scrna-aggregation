@@ -42,6 +42,7 @@ themselves (locate_scRNA_artifacts, summarize_scRNA_experiments) get credentials
 | 3d | join/filter | `join_and_filter_tsv --input cmd.tsv --output <lib>.joined_filtered_cell_metadata.txt --set-first --set PREFIX <lib> [--join mmc.tsv cell_barcode cell_id] <args from args_file>` (py) | per library | MMC join comes first so manifest filters can use its columns. A donor in manifest overrides donor col via args_file. |
 | 4 | triplet manifest | writes YAML `dges:` list: dge (local path), prefix=library, barcode_list=<lib>.joined_filtered_cell_metadata.txt, barcode_column=cell_barcode | gather | -> `ID.make_triplet_dge.yaml` |
 | 5 | combine DGEs | `MakeTripletDge -m MEM TMP_DIR VALIDATION_STRINGENCY=SILENT OUTPUT=matrix.mtx.gz OUTPUT_CELLS=barcodes.tsv.gz OUTPUT_FEATURES=features.tsv.gz MANIFEST=... REDUCED_GTF=...` (java) | gather | -> matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz (reduced GTF ~340 MB, same for all libraries) |
+| 5b | h5ad per library | `build_library_h5ad --dge <lib DGE> --cell-metadata <lib>.joined_filtered_cell_metadata.txt --reduced-gtf GTF --uppercase-column cell_barcode --output h5ad/<lib>.h5ad` (py) | per library, after the reduced GTF is localized | -> `h5ad/<lib>.h5ad`: `X` raw counts, `obs` the cell metadata indexed `<lib>_<barcode>` with `CELL_BARCODE`, `var` gene IDs (`gene_ids`) with `gene_symbol`; plain string arrays |
 | 6 | combine metadata | `cat_tsvs --output ID.cell_metadata.txt --index-col PREFIX --index-col cell_barcode <lib metadata files>` (py) | gather | -> `ID.cell_metadata.txt` |
 | gate | donor column? | if `donor` not in header of cell_metadata: warn, skip 7-9 | conditional | |
 | 7 | donor/cell type report | `donor_cell_type_report --input cell_metadata --output ID.donor_cell_type.txt --cell-type-column COL` (py) | only if cell type column exists | -> tsv (donor, cell_type, num_nuclei, fraction_nuclei, median_umis_per_nucleus) |
@@ -51,12 +52,12 @@ themselves (locate_scRNA_artifacts, summarize_scRNA_experiments) get credentials
 ## Outputs (prototype, written to out-dir)
 `ID.library_metrics.txt`, `tearsheets/<lib>.standard_analysis_tearsheet.txt`, `<lib>.joined_filtered_cell_metadata.txt`,
 `ID.make_triplet_dge.yaml`, `ID.cell_type_column.txt` (only with MapMyCells results; added to the prototype 2026-10-16), `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
-`ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`
+`ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`, `h5ad/<lib>.h5ad`
 (+ intermediate `artifacts/`, `resolved_manifest/`).
 
 Pipeline: publishes the merged files flat in `--outdir` (`ID.library_metrics.txt`, `ID.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`,
 `features.tsv.gz`; with donors also `ID.donors.metacells.txt.gz`, and with donors and a cell type column also `ID.donor_cell_type.txt` and
-`ID.donor_cell_type.metacells.txt.gz`), `artifacts/<uei>.yaml`, `tearsheets/` and `pipeline_info/` (with `ID.resolved_libraries.txt`). The
+`ID.donor_cell_type.metacells.txt.gz`), `artifacts/<uei>.yaml`, `tearsheets/`, `h5ad/<uei>.h5ad` and `pipeline_info/` (with `ID.resolved_libraries.txt`). The
 per-library joined cell metadata, the triplet manifest and the args files stay in the work directory; there is no `cell_type_column.txt` or
 `resolved_manifest/`.
 
@@ -94,6 +95,7 @@ The original validated run, kept for reference and never modified, is in `/Users
 | 2b, 6 | MERGE_LIBRARY_METADATA (twice: library metrics, cell metadata) |
 | 3b | FORMAT_MAPMYCELLS_ANNOTATIONS (tool `convert_mmc_csv`) |
 | 3d | BUILD_LIBRARY_CELL_METADATA (tool `join_and_filter_tsv`) |
+| 5b | BUILD_LIBRARY_H5AD (tool `build_library_h5ad`) |
 | 4, 5 | MAKE_TRIPLET_DGE |
 | 7 | DONOR_CELL_TYPE_REPORT |
 | 8, 9 | MAKE_METACELLS_FROM_TRIPLET_DGE (called twice: donor; donor and cell type) |

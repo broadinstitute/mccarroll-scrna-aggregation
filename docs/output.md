@@ -35,6 +35,11 @@ produces (its metrics row, its joined and filtered cell metadata, its MapMyCells
 - `<analysis>.donor_cell_type.metacells.txt.gz` - expression summed per donor and cell type (only with donors and a cell type column).
 - `artifacts/<library>.yaml` - the artifacts found for each DGE of the manifest.
 - `tearsheets/<library>.standard_analysis_tearsheet.txt` - the tearsheet of each library.
+- `h5ad/<library>.h5ad` - the expression of each library as an h5ad file, for the cells of its cell metadata. `X` has the raw counts (cells x genes, sparse, uint32). `obs` is the
+  library's joined and filtered cell metadata, indexed by `<library>_<cell barcode>` (the cell names of `barcodes.tsv.gz`, so that the files of several libraries can be
+  combined without renaming), with the bare barcode as the column `CELL_BARCODE` (upper case, as the readers of these files require; the cell metadata files keep `cell_barcode`; set by `ext.args`
+  `--uppercase-column cell_barcode` in `conf/modules.config`) and `PREFIX` as columns; missing values are encoded with `aggregate_filter_adata.sanitize_dataframe`. Strings (the cell names, `CELL_BARCODE`, gene IDs and symbols) are plain string arrays, not nullable string arrays. `var` is indexed by gene ID
+  (`gene_ids`) and has the column `gene_symbol`, from the reduced GTF. Every library gets one, with or without donors or MapMyCells results.
 
 Either all libraries have donors (a `donor` in the manifest entry, or a village in the artifacts) or none do; a mix stops the run. Without donors, or without a
 cell type column, the steps that need them are skipped with a warning.

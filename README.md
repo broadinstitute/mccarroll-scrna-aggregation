@@ -4,7 +4,7 @@
 
 **mccarroll/scrna-aggregation** is a Nextflow pipeline that aggregates single-library scRNA-seq results (outputs of the Nextflow scRNA pipeline, stored on
 Google Cloud) into one analysis. A YAML manifest names the DGE of each library, with optional donors, cell metadata filters and joins. The pipeline finds the artifacts of
-every library, summarizes them, merges the libraries into one sparse expression matrix and one cell metadata table, and, when the libraries have donors, reports
+every library, summarizes them, merges the libraries into one sparse expression matrix and one cell metadata table (and writes an h5ad file for each library), and, when the libraries have donors, reports
 and aggregates expression per donor and cell type.
 
 The main steps are:
@@ -14,81 +14,14 @@ The main steps are:
 2. Summarize each library (`SUMMARIZE_SCRNA_EXPERIMENTS`) and merge the library metrics (`MERGE_LIBRARY_METRICS`).
 3. Convert the MapMyCells annotations, if there are any (`FORMAT_MAPMYCELLS_ANNOTATIONS`), and build each library's cell metadata with the manifest's joins and filters
    (`BUILD_LIBRARY_CELL_METADATA`).
-4. Merge the cell metadata (`MERGE_CELL_METADATA`) and the DGEs into one sparse matrix (`MAKE_TRIPLET_DGE`).
-5. With donors: the donor by cell type report (`DONOR_CELL_TYPE_REPORT`) and the donor and donor by cell type metacells (`DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`).
+4. Write an h5ad file for each library (`BUILD_LIBRARY_H5AD`, in `h5ad/`): its counts, with its cell metadata as `obs` and the gene IDs and symbols as `var`.
+5. Merge the cell metadata (`MERGE_CELL_METADATA`) and the DGEs into one sparse matrix (`MAKE_TRIPLET_DGE`).
+6. With donors: the donor by cell type report (`DONOR_CELL_TYPE_REPORT`) and the donor and donor by cell type metacells (`DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`).
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryTextColor": "#111111", "primaryBorderColor": "#333333", "lineColor": "#8a8a8a", "clusterBkg": "#f7f7fb", "clusterBorder": "#9a9ab8", "titleColor": "#111111"}}}%%
-flowchart TD
-    manifest[/"manifest.yaml<br/>DGEs, donors, filters, joins"/]:::input
+![Workflow of the pipeline: the manifest is checked and the artifacts located; each library is summarized and gets its cell metadata and its h5ad file; the libraries are then merged and the donor steps run](docs/figures/workflow.svg)
 
-    check["Check the manifest<br/>schema, every named file exists"]:::head
-    locate["LOCATE_SCRNA_ARTIFACTS"]
-    resolve["LibraryResolver<br/>what each library is processed from"]:::head
-
-    manifest --> check --> locate --> resolve
-
-    subgraph per_library ["one task per library"]
-        summarize["SUMMARIZE_SCRNA_EXPERIMENTS"]
-        format["FORMAT_MAPMYCELLS_ANNOTATIONS<br/>only with MapMyCells results"]
-        build["BUILD_LIBRARY_CELL_METADATA<br/>PREFIX, MapMyCells join,<br/>manifest joins and filters"]
-        format --> build
-    end
-
-    resolve --> summarize
-    resolve --> format
-    resolve --> build
-
-    merge_metrics["MERGE_LIBRARY_METRICS"]
-    summarize --> merge_metrics
-
-    sorted(["all libraries, in manifest order"]):::head
-    merge_cells["MERGE_CELL_METADATA"]
-    triplet["MAKE_TRIPLET_DGE"]
-    build --> sorted
-    sorted --> merge_cells
-    sorted --> triplet
-
-    has_donors{"donors?"}:::gate
-    has_cell_type{"cell type<br/>column?"}:::gate
-    donor_metacells["DONOR_METACELLS"]
-    cell_type_metacells["DONOR_CELL_TYPE_METACELLS"]
-    report["DONOR_CELL_TYPE_REPORT"]
-    merge_cells --> has_donors
-    triplet --> has_donors
-    has_donors --> donor_metacells
-    has_donors --> has_cell_type
-    has_cell_type --> cell_type_metacells
-    has_cell_type --> report
-
-    out_artifacts[("artifacts/")]:::output
-    out_summary[("pipeline_info/<br/>ID.resolved_libraries.txt")]:::output
-    out_tearsheets[("tearsheets/")]:::output
-    out_metrics[("ID.library_metrics.txt")]:::output
-    out_cells[("ID.cell_metadata.txt")]:::output
-    out_matrix[("matrix.mtx.gz<br/>barcodes.tsv.gz<br/>features.tsv.gz")]:::output
-    out_donor[("ID.donors.metacells.txt.gz")]:::output
-    out_cell_type[("ID.donor_cell_type.metacells.txt.gz")]:::output
-    out_report[("ID.donor_cell_type.txt")]:::output
-
-    locate -.-> out_artifacts
-    resolve -.-> out_summary
-    summarize -.-> out_tearsheets
-    merge_metrics -.-> out_metrics
-    merge_cells -.-> out_cells
-    triplet -.-> out_matrix
-    donor_metacells -.-> out_donor
-    cell_type_metacells -.-> out_cell_type
-    report -.-> out_report
-
-    classDef default fill:#ffffff,stroke:#333333,color:#111111
-    classDef input fill:#eef3fb,stroke:#4a6fa5,color:#111111
-    classDef head fill:#fff6e0,stroke:#b8860b,color:#111111
-    classDef gate fill:#f4f4f4,stroke:#777777,color:#111111
-    classDef output fill:#eaf5ea,stroke:#3d7a3d,color:#111111
-    style per_library fill:#f7f7fb,stroke:#9a9ab8,color:#111111
-    linkStyle default stroke:#8a8a8a
-```
+The figure is `docs/figures/workflow.svg`, drawn from the Mermaid source [docs/figures/workflow.mmd](docs/figures/workflow.mmd) (GitHub also renders that file on its own). To
+change it, edit the source, run [docs/figures/render.sh](docs/figures/render.sh) to render the SVG again, and commit both files (see [docs/development.md](docs/development.md)).
 
 Boxes are processes (each runs in a container); yellow steps run in the Nextflow head job; green cylinders are what is published to `--outdir`
 (`ID` is `--analysis_id`). The donor steps run only if every library has donors (a manifest `donor` or a village in its artifacts), and the

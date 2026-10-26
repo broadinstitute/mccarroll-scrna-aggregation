@@ -103,7 +103,11 @@ nextflow_pipeline {
                 // no donors and no MapMyCells results: the steps are skipped with a warning, and nothing of them is published
                 { assert log.contains('have no donors') },
                 { assert log.contains('No library has MapMyCells results') },
-                { assert !(out.list() as List).any { it.contains('donor') || it.contains('cell_type') } }
+                { assert !(out.list() as List).any { it.contains('donor') || it.contains('cell_type') } },
+                // BUILD_LIBRARY_H5AD runs for every library, with or without donors and MapMyCells results: one h5ad per library in h5ad/
+                // (its content is checked by the module tests, and byte for byte against the baseline by the live tests)
+                { assert (new File(out, 'h5ad').list() as List).sort() == ['LIB_PLAIN_1.h5ad', 'LIB_PLAIN_2.h5ad'] },
+                { assert new File(out, 'h5ad').listFiles().every { it.length() > 0 } }
             )
         }
     }

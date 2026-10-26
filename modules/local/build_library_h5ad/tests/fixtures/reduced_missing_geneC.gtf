@@ -1,0 +1,4 @@
+chr	start	end	strand	gene_name	gene_id	transcript_name	transcript_id	transcriptType	annotationType
+chr1	100	200	+	GENEA	ENSG01	NA	NA	NA	gene
+chr1	100	150	+	GENEA	ENSG01	GENEA-201	ENST01	protein_coding	exon
+chr1	300	400	+	GENEB	ENSG02	NA	NA	NA	gene

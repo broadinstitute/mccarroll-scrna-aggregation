@@ -1,0 +1,74 @@
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffffff", "primaryTextColor": "#111111", "primaryBorderColor": "#333333", "lineColor": "#8a8a8a", "clusterBkg": "#f7f7fb", "clusterBorder": "#9a9ab8", "titleColor": "#111111"}}}%%
+flowchart TD
+    manifest[/"manifest.yaml<br/>DGEs, donors, filters, joins"/]:::input
+
+    check["Check the manifest<br/>schema, every named file exists"]:::head
+    locate["LOCATE_SCRNA_ARTIFACTS"]
+    resolve["LibraryResolver<br/>what each library is processed from"]:::head
+
+    manifest --> check --> locate --> resolve
+
+    subgraph per_library ["one task per library"]
+        summarize["SUMMARIZE_SCRNA_EXPERIMENTS"]
+        format["FORMAT_MAPMYCELLS_ANNOTATIONS<br/>only with MapMyCells results"]
+        build["BUILD_LIBRARY_CELL_METADATA<br/>PREFIX, MapMyCells join,<br/>manifest joins and filters"]
+        h5ad["BUILD_LIBRARY_H5AD<br/>counts + cell metadata"]
+        format --> build
+        build --> h5ad
+    end
+
+    resolve --> summarize
+    resolve --> format
+    resolve --> build
+
+    merge_metrics["MERGE_LIBRARY_METRICS"]
+    summarize --> merge_metrics
+
+    sorted(["all libraries, in manifest order"]):::head
+    merge_cells["MERGE_CELL_METADATA"]
+    triplet["MAKE_TRIPLET_DGE"]
+    build --> sorted
+    sorted --> merge_cells
+    sorted --> triplet
+
+    has_donors{"donors?"}:::gate
+    has_cell_type{"cell type<br/>column?"}:::gate
+    donor_metacells["DONOR_METACELLS"]
+    cell_type_metacells["DONOR_CELL_TYPE_METACELLS"]
+    report["DONOR_CELL_TYPE_REPORT"]
+    merge_cells --> has_donors
+    triplet --> has_donors
+    has_donors --> donor_metacells
+    has_donors --> has_cell_type
+    has_cell_type --> cell_type_metacells
+    has_cell_type --> report
+
+    out_artifacts[("artifacts/")]:::output
+    out_summary[("pipeline_info/<br/>ID.resolved_libraries.txt")]:::output
+    out_tearsheets[("tearsheets/")]:::output
+    out_h5ad[("h5ad/")]:::output
+    out_metrics[("ID.library_metrics.txt")]:::output
+    out_cells[("ID.cell_metadata.txt")]:::output
+    out_matrix[("matrix.mtx.gz<br/>barcodes.tsv.gz<br/>features.tsv.gz")]:::output
+    out_donor[("ID.donors.metacells.txt.gz")]:::output
+    out_cell_type[("ID.donor_cell_type.metacells.txt.gz")]:::output
+    out_report[("ID.donor_cell_type.txt")]:::output
+
+    locate -.-> out_artifacts
+    resolve -.-> out_summary
+    summarize -.-> out_tearsheets
+    h5ad -.-> out_h5ad
+    merge_metrics -.-> out_metrics
+    merge_cells -.-> out_cells
+    triplet -.-> out_matrix
+    donor_metacells -.-> out_donor
+    cell_type_metacells -.-> out_cell_type
+    report -.-> out_report
+
+    classDef default fill:#ffffff,stroke:#333333,color:#111111
+    classDef input fill:#eef3fb,stroke:#4a6fa5,color:#111111
+    classDef head fill:#fff6e0,stroke:#b8860b,color:#111111
+    classDef gate fill:#f4f4f4,stroke:#777777,color:#111111
+    classDef output fill:#eaf5ea,stroke:#3d7a3d,color:#111111
+    style per_library fill:#f7f7fb,stroke:#9a9ab8,color:#111111
+    linkStyle default stroke:#8a8a8a

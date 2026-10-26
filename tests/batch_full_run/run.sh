@@ -61,11 +61,17 @@ for f in "${merged[@]}"; do
   check $? "$f equals the baseline"
 done
 
+# 1b. the h5ad file of each library equals the baseline's (md5 of the bytes: the file is binary, see docs/testing.md)
+for f in "$BASELINE"/h5ad/*.h5ad; do
+  [[ -f $RUN/out/h5ad/$(basename "$f") && $(md5 -q "$RUN/out/h5ad/$(basename "$f")") == "$(md5 -q "$f")" ]]
+  check $? "h5ad/$(basename "$f") equals the baseline"
+done
+
 # 2. exact top-level listing
-expected=$(printf '%s\n' "${merged[@]}" artifacts tearsheets pipeline_info | sort)
+expected=$(printf '%s\n' "${merged[@]}" artifacts tearsheets h5ad pipeline_info | sort)
 actual=$(ls "$RUN/out" | sort)
 [[ $expected == "$actual" ]]
-check $? "the top level of --outdir is exactly the merged files, artifacts/, tearsheets/ and pipeline_info/"
+check $? "the top level of --outdir is exactly the merged files, artifacts/, tearsheets/, h5ad/ and pipeline_info/"
 [[ $expected == "$actual" ]] || diff <(echo "$expected") <(echo "$actual")
 
 # 3 and 4. the trace (tab separated, columns found by name). The trace has no executor field: a task submitted to Google Batch has a job id in

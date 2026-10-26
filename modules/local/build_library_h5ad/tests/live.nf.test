@@ -1,0 +1,69 @@
+nextflow_process {
+
+    name "Test Process BUILD_LIBRARY_H5AD against the baseline"
+    script "modules/local/build_library_h5ad/main.nf"
+    process "BUILD_LIBRARY_H5AD"
+    config "./uppercase.config"
+    tag "modules"
+    tag "modules_local"
+    tag "build_library_h5ad"
+    tag "live"
+
+    // Live test: needs Docker and the baseline (tests/live_data/baseline, see docs/testing.md, "Live tests"); no network or credentials.
+    // Runs the module on the baseline's own inputs for each library: the DGE the prototype fetched (tmp/<library>/), the library's joined and filtered
+    // cell metadata (<library>.joined_filtered_cell_metadata.txt) and the reduced GTF (tmp/), with the pipeline's default argument (uppercase.config:
+    // --uppercase-column cell_barcode, as step 5b of the prototype passes it), and compares the h5ad with the baseline's
+    // h5ad/<library>.h5ad (made by step 5b of the prototype script). The files are compared by md5 of the bytes, which holds while the image's
+    // python libraries stay the same: after an image update, check the content (see docs/testing.md) before remaking the baseline.
+
+    // the libraries of the baseline: one h5ad/<library>.h5ad each
+    def baselineLibraries = { File root ->
+        def dir = new File(root, 'h5ad')
+        assert dir.isDirectory() : "no h5ad directory in ${root}: remake the baseline with the current prototype script (see docs/testing.md, Live tests)"
+        dir.listFiles().findAll { it.name.endsWith('.h5ad') }*.name*.minus('.h5ad').sort()
+    }
+    def baselineDge = { File root, String library ->
+        def f = new File(root, "tmp/${library}").listFiles()?.find { it.name.endsWith('.digital_expression.txt.gz') }
+        assert f : "no DGE in ${root}/tmp/${library}"
+        f
+    }
+    def baselineGtf = { File root ->
+        def f = new File(root, 'tmp').listFiles()?.find { it.name.endsWith('.reduced.gtf') }
+        assert f : "no reduced GTF in ${root}/tmp"
+        f
+    }
+
+    test("Should reproduce the baseline h5ad file of the library from the baseline inputs") {
+
+        when {
+            // projectDir is only visible inside the when/then blocks, so each block builds the baseline root.
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def library = baselineLibraries(root)[0]
+            process {
+                """
+                input[0] = record(id: '${library}', dge: file('${baselineDge(root, library)}'), cell_metadata: file('${root}/${library}.joined_filtered_cell_metadata.txt'))
+                input[1] = file('${baselineGtf(root)}')
+                """
+            }
+        }
+
+        then {
+            def root = new File("${projectDir}/tests/live_data/baseline".toString())
+            def library = baselineLibraries(root)[0]
+            def generated = file(process.out.h5ad[0].h5ad)
+            def baseline = new File(root, "h5ad/${library}.h5ad")
+            def generatedMd5 = LiveFiles.contentMd5(generated)
+            def same = generatedMd5 == LiveFiles.contentMd5(baseline)
+            println ""
+            println "Generated: ${generated}"
+            println "Baseline:  ${baseline}"
+            println(same ? "  matches baseline (md5 ${generatedMd5})" : "  differs from the baseline: generated ${generated.length()} bytes, baseline ${baseline.length()} bytes")
+            assertAll(
+                { assert process.success },
+                { assert process.out.h5ad[0].id == library },
+                { assert generated.name == baseline.name },
+                { assert same : "the h5ad file differs from the baseline" }
+            )
+        }
+    }
+}

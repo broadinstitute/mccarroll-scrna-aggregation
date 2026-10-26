@@ -90,6 +90,7 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     tearsheets: Channel<Path> = results.tearsheets
     library_metrics: Value<Path> = results.library_metrics
     cell_metadata: Value<Path> = results.cell_metadata
+    h5ad: Channel<Path> = results.h5ad
     matrix: Value<Path> = results.matrix
     barcodes: Value<Path> = results.barcodes
     features: Value<Path> = results.features
@@ -147,6 +148,7 @@ workflow {
     tearsheets = results.tearsheets
     library_metrics = results.library_metrics
     cell_metadata = results.cell_metadata
+    h5ad = results.h5ad
     matrix = results.matrix
     barcodes = results.barcodes
     features = results.features
@@ -171,6 +173,7 @@ output {
     // merged results, flat
     library_metrics           { path '.' }
     cell_metadata             { path '.' }
+    h5ad                      { path '.' }   // the task output is already h5ad/<uei>.h5ad
     matrix                    { path '.' }
     barcodes                  { path '.' }
     features                  { path '.' }

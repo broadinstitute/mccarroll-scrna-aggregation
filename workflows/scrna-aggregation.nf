@@ -13,6 +13,7 @@ include { BUILD_LIBRARY_CELL_METADATA } from '../modules/local/build_library_cel
 include { SUMMARIZE_SCRNA_EXPERIMENTS } from '../modules/local/summarize_scrna_experiments/main'
 include { MERGE_LIBRARY_METADATA as MERGE_LIBRARY_METRICS } from '../modules/local/merge_library_metadata/main'
 include { MERGE_LIBRARY_METADATA as MERGE_CELL_METADATA } from '../modules/local/merge_library_metadata/main'
+include { BUILD_LIBRARY_H5AD } from '../modules/local/build_library_h5ad/main'
 include { MAKE_TRIPLET_DGE } from '../modules/local/make_triplet_dge/main'
 include { DONOR_CELL_TYPE_REPORT } from '../modules/local/donor_cell_type_report/main'
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
@@ -219,6 +220,16 @@ workflow SCRNA_AGGREGATION {
     // <library id>_<cell barcode>), in library order.
     triplet = MAKE_TRIPLET_DGE(triplet_input, reduced_gtf)
 
+    // Input: built (one item per library) joined on id with libraries, for the DGE each library is processed from (the DGE the manifest names, localized
+    // from its gs:// path), and reduced_gtf (one item, used for every library).
+    // Emits: BUILD_LIBRARY_H5AD result, one item per library, record(id: library id, h5ad: path('h5ad/<library>.h5ad')): the counts of the library's
+    // DGE for its cells, with the cell metadata as obs (cells named <library id>_<cell barcode>, as in the matrix) and the gene IDs and symbols as var.
+    // Published to <outdir>/h5ad/ (the output block in main.nf). Independent of donors and MapMyCells results: every library gets one.
+    library_h5ad = BUILD_LIBRARY_H5AD(
+        built.join(libraries.map { library -> record(id: library.id, dge: file(library.dge)) }, by: 'id'),
+        reduced_gtf
+    )
+
     // The donor steps need donors, which the resolver knows from the manifest and the artifacts (all libraries have donors or none do), and the
     // cell type steps also need a cell type column (some library has MapMyCells results). A missing piece skips the steps with a warning.
     resolved.subscribe { result ->
@@ -265,12 +276,13 @@ workflow SCRNA_AGGREGATION {
 
     // What the pipeline publishes: the entry workflow's `publish:` section and the `output` block in main.nf say where each goes.
     // Input: the process results above. Emits: one channel of paths per published file (the merged results and pipeline_info files, one item each; the
-    // artifacts directory and the tearsheets, one per library or one directory).
+    // artifacts directory, the tearsheets and the h5ad files, one per library or one directory).
     emit:
     artifacts: Value<Path> = located.map { item -> item.artifacts }
     tearsheets: Channel<Path> = summaries.map { item -> item.tearsheet }
     library_metrics: Value<Path> = merged_metrics.map { item -> item.combined }
     cell_metadata: Value<Path> = merged_cell_metadata.map { item -> item.combined }
+    h5ad: Channel<Path> = library_h5ad.map { item -> item.h5ad }
     matrix: Value<Path> = triplet.map { item -> item.matrix }
     barcodes: Value<Path> = triplet.map { item -> item.barcodes }
     features: Value<Path> = triplet.map { item -> item.features }
