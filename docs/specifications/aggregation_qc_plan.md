@@ -513,9 +513,9 @@ Steps 1-7 are done (see "Status and next step").
     (`PdfPages.get_pagecount()`)
 
   Run them with `cd public/src/python; uv run python -m unittest discover -s tests/aggregation -t .`
-- End-to-end on the new baseline:
-  `uv run aggregation_qc --cell-metadata .../baseline/SMRI_V11.unfiltered.cell_metadata.txt --library-metrics .../baseline/SMRI_V11.unfiltered.library_metrics.txt --cell-type-column HMBA_Human_WB_v0.5_neighborhood_name --donor-file <local copy of the donor file> --analysis-id SMRI_V11.unfiltered --output-dir <scratch>`.
-  The donor file, also recorded as `donor_file` in the regenerated artifact YAML, is in GCS:
+- End-to-end on the new baseline (done): run the tool from the Docker image, through the prototype script, not with `uv run`:
+  `docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml --analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current --run-qc`
+  (see `../testing.md`). The donor file, recorded as `donor_file` in the artifact YAML, is
   `gs://mccarroll_scrnaseq_central_temp/alecw/nextflow_inputs/2024-03-27_SMRI_V11.donors.txt`.
 - Parity against the legacy run: run on the legacy v138 data, which has conditions and cell
   types, using the column-name options
