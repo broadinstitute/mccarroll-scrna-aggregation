@@ -20,6 +20,9 @@ donor x cell-type metacells.
 | --mmc-model / --mmc-level | optional | params.mmc_model / mmc_level |
 | --reference | optional | none: libraries with different references fail in the resolver |
 | --java-memory | `-m` for Java tools | none: the JVM heap is 80% of `task.memory` (15 GB, then 30 GB, for the three Java steps in `conf/modules.config`) |
+| --run-qc | run the optional QC step 10 (a boolean flag) | none yet: planned as `params.run_qc` (`aggregation_qc_plan.md`) |
+| --qc-conditions-file / --qc-condition-column | condition of each library, from a TSV (header, library and condition) or from a cell metadata column; not both | planned: `params.qc_conditions_file` / `qc_condition_column` |
+| --qc-core-cell-types | headerless list of the core cell types, one per line | planned: `params.qc_core_cell_types` |
 | (none) | GCP credentials mounted into the containers | params.gcp_credentials_file (docker profile only; default: your Application Default Credentials) |
 
 Containers: python tools `quay.io/broadinstitute/drop-seq_python:current`; java tools `quay.io/broadinstitute/drop-seq_java:current` (both public; the
@@ -48,12 +51,15 @@ themselves (locate_scRNA_artifacts, summarize_scRNA_experiments) get credentials
 | 7 | donor/cell type report | `donor_cell_type_report --input cell_metadata --output ID.donor_cell_type.txt --cell-type-column COL` (py) | only if cell type column exists | -> tsv (donor, cell_type, num_nuclei, fraction_nuclei, median_umis_per_nucleus) |
 | 8 | donor metacells | `MakeMetacellsFromTripletDge -m MEM MATRIX FEATURES BARCODES MAPPING=cell_metadata CELL_BARCODE_COLUMN=cell_barcode TMP_DIR VALIDATION_STRINGENCY=SILENT OUTPUT=ID.donors.metacells.txt.gz GROUP_COLUMNS=donor` (java) | needs donor col | |
 | 9 | donor x cell type metacells | same, `OUTPUT=ID.donor_cell_type.metacells.txt.gz GROUP_COLUMNS=donor GROUP_COLUMNS=COL` | needs donor col and cell type col | |
+| 10 | optional QC | `aggregation_qc --cell-metadata cell_metadata --library-metrics ID.library_metrics.txt --analysis-id ID --output-dir out-dir [--donor-file F...] [--cell-type-column COL] [--conditions-file F or --condition-column C] [--core-cell-types F]` (py) | only with `--run-qc`; `--donor-file` only if every library's artifact YAML has a `donor_file` | -> `ID.donor_qc.txt` and the PDFs; outputs whose inputs are missing are skipped, not an error (gates in `aggregation_qc_plan.md`) |
 
 ## Outputs (prototype, written to out-dir)
 `ID.library_metrics.txt`, `tearsheets/<lib>.standard_analysis_tearsheet.txt`, `<lib>.joined_filtered_cell_metadata.txt`,
 `ID.make_triplet_dge.yaml`, `ID.cell_type_column.txt` (only with MapMyCells results; added to the prototype 2026-10-16), `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
 `ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`, `h5ad/<lib>.h5ad`
-(+ intermediate `artifacts/`, `resolved_manifest/`).
+and, only with `--run-qc`, `ID.donor_qc.txt`, `ID.library_metrics.pdf`, `ID.filtered_library_metrics.pdf`, `ID.donor_summary.pdf`,
+`ID.donor_nuclei_counts.pdf`, `ID.cell_type_counts.pdf`, `ID.cell_type_median_UMIs.pdf`, `ID.cell_type_proportions.pdf` and
+`ID.donor_cell_type_distributions.pdf` (+ intermediate `artifacts/`, `resolved_manifest/`).
 
 Pipeline: publishes the merged files flat in `--outdir` (`ID.library_metrics.txt`, `ID.cell_metadata.txt`, `matrix.mtx.gz`, `barcodes.tsv.gz`,
 `features.tsv.gz`; with donors also `ID.donors.metacells.txt.gz`, and with donors and a cell type column also `ID.donor_cell_type.txt` and

@@ -1,8 +1,41 @@
 # Plan: optional aggregation QC step
 
-Status: **planned, not implemented.** Written 2026-10-27. Follow the process in `TODO.md` for the
+Status: **the Python tool and the prototype-script step are done and validated (Part 5, steps 1-7); the Nextflow process (step 8) is not started.** Follow the process in `TODO.md` for the
 Nextflow part (clarification questions, data contract, severity-ranked candidate tests, then
 stop for the user's selection).
+
+## Status and next step
+
+**Done**
+- `aggregation_qc` is in the Drop-seq repo (`transcriptome_java/public/src/python`, package `dropseq.aggregation.plots`, merged in
+  PR #593) and in the public image `quay.io/broadinstitute/drop-seq_python:current` (digest
+  `sha256:05b95c05121f7f91ea5dd0d5cb570c90af4e240e9d5ffe1f852f67a7b87e973c`). `locate_scRNA_artifacts` in that image records `donor_file`.
+- The CLI is as in Part 3, with one change from the first design: the tool takes the donor files themselves (`--donor-file FILE [FILE ...]`, optional, local
+  or `gs://`, compared by content) and knows nothing about artifact YAMLs. The caller extracts `donor_file` from each library's artifact YAML and passes the files
+  only if every library has one.
+- `docs/specifications/scrna-aggregation_prototype.sh` has the optional step 10 (`--run-qc`, `--qc-conditions-file`, `--qc-condition-column`, `--qc-core-cell-types`);
+  `SPEC_SUMMARY.md` and `../testing.md` describe it. It extracts `donor_file` with `sed` from `artifacts/<uei>.yaml` and copies the donor, conditions and core
+  cell type files into `TMP_DIR/qc` (the container only mounts `OUT_DIR`, `TMP_DIR` and the manifest directory).
+- Validated on the live baseline (SMRI_V11, one library, 238 cells): `--image-tag current --run-qc` exits 0 and writes `donor_qc.txt` and the 8 PDFs
+  (`library_metrics` 12 pages, `filtered_library_metrics` 2, `donor_summary` 11, `donor_nuclei_counts` 4, `cell_type_counts`, `cell_type_median_UMIs` and
+  `cell_type_proportions` 4 each, `donor_cell_type_distributions` 2). The other baseline files are byte-identical to the baseline made without QC, apart from the new
+  `donor_file` line in `artifacts/SMRI_V11_rxn1.yaml`. The same run with a locally built `jn_test` image gave identical files. The tool was also compared with the legacy R
+  plots on the Zamboni SMRI_V11 aggregation (`donor_qc` identical, pages equivalent apart from the intended changes).
+- Unit tests: `cd transcriptome_java/public/src/python; uv run pytest tests/aggregation` (`test_qc_tables.py`, `test_aggregation_qc.py`, and the `donor_file` cases of `test_locate_scRNA_artifacts.py`).
+
+**Behaviour to know about (as implemented)**
+- Cells without a cell type are left out of every cell type page, so proportions are fractions of the labelled nuclei of the group; `donor_qc.txt` still uses all cells with a donor.
+- A donor x cell type combination with no nuclei has 0 nuclei and 0 fraction but an NA median (not 0). Expected donors with no cells are in `donor_qc.txt` (`num_nuclei` 0, NA values).
+- Donor files can have Windows (CRLF) line endings (the SMRI_V11 one does); the reader strips them.
+- `--library-metrics` may name a library that has no cells in the cell metadata; with `--conditions-file` such a library needs a condition too, with `--condition-column` it is labelled `unknown`.
+- Outputs are flat in `--output-dir` with the legacy names. A skipped output exits 0 and is logged. Value labels follow R's formatting (4 significant digits, no trailing zeros).
+
+**Next: step 8, the Nextflow process** (Part 4), in this order:
+1. The `LOCATE_SCRNA_ARTIFACTS` module tests: with the new image `main.nf.test` "Should emit the expected artifact paths ..." fails because the expected
+   `fixtures/expected/LIB_A.yaml` and `LIB_B.yaml` lack `donor_file` (the live `gcs.nf.test` passes against the new baseline). Give the fixture village `properties.yaml` a
+   `donorFile` and the expected YAMLs the `donor_file` line (see "Dependency on the artifact YAML").
+2. Check that `lib/LibraryResolver.groovy` does not assume a fixed field list, then write the Groovy that collects each library's `donor_file` (none if any is NA or missing).
+3. The `AGGREGATION_QC` module, params, pre-flight checks, publishing, tests and docs of Part 4, following `TODO.md`.
 
 ## Context
 
@@ -30,16 +63,16 @@ New-pipeline example output: `/Users/nemesh/mccarroll-scrna-aggregation/tests/li
 
 ## Starting a session
 
-- **Where the Python code goes:** `/Users/nemesh/dropseqrna/transcriptome_java/public`, a git
-  submodule (repo `broadinstitute/Drop-seq`), directory `src/python`, branch
-  `jn_aggregation_qc` (already pushed). The build is hatchling with a `src` layout, so the new
-  `dropseq/aggregation/plots/` needs an `__init__.py`. The outer `dropseqrna` repo's submodule
-  pointer is updated only when the implementation is finished.
+- **Where the Python code is:** `/Users/nemesh/dropseqrna/transcriptome_java/public`, a git
+  submodule (repo `broadinstitute/Drop-seq`, branch `master`), directory `src/python`
+  (hatchling, `src` layout), package `dropseq.aggregation.plots`. Further Python changes need
+  a feature branch and a PR there; a changed image needs a new public build (or a local build
+  with the tag `jn_test`, see `../testing.md`). The outer `dropseqrna` repo's submodule pointer
+  is not part of this work.
 - **Tests:** `cd /Users/nemesh/dropseqrna/transcriptome_java/public/src/python; uv run pytest tests/aggregation`
   (or `uv run python -m unittest discover -s tests/aggregation -t .`).
 - **Rules:** Python only (no R), snake_case column names, edit only inside
-  `public/src/python`. Ask before editing `command_line_programs.tsv` (another repo, see
-  Packaging). Commit only when asked.
+  `public/src/python`. Commit only when asked.
 - **Page-by-page spec:** Part 1 summarises the legacy code, but the R files are the reference
   for page order, subtitles and labels: `plot_library_metrics.R`,
   `generate_donor_qc_table_patched.R` and `plot_donor_celltype_qc_patched.R` in the legacy
@@ -180,7 +213,10 @@ Bugs seen in the rendered v138 PDFs:
    village `properties.yaml`, and from nowhere else. Never use the VCF, which holds more
    donors than the experiment, and there is no override param.
    - All libraries must share one donor set, compared by file **contents**, not location.
-   - If the sets differ, or some libraries have no donorFile, log it and skip **all
+   - The tool knows nothing about artifact YAMLs: it takes the donor files themselves
+     (`--donor-file`). The caller (the shell script or the Nextflow process) extracts `donor_file`
+     from each library's artifact YAML, and passes none at all if any library has none.
+   - If no donor file is given, or the sets differ, log it and skip **all
      donor-level outputs**. Library-level and overall cell-type outputs are still produced.
    - An aggregation that mixes villages is legitimate; it just doesn't get donor QC.
 3. **Core cell types** (replaces the hard-coded "primary neuron" list).
@@ -245,7 +281,7 @@ New subpackage `transcriptome_java/public/src/python/src/dropseq/aggregation/plo
 |---|---|
 | `__init__.py` | empty (it uses the `logger` and `add_log_argument` from `dropseq.aggregation`) |
 | `aggregation_qc.py` | CLI `main()`. Reads and validates the inputs, resolves the condition / expected donors / core cell types, decides which outputs are enabled (gating), and calls the reports. |
-| `qc_tables.py` | Pure pandas, no plotting: `donor_qc_table`, `library_cell_summary`, `complete_donor_cell_type` (donor x cell type grid filled with zeros, plus an expected flag), `resolve_conditions`, `expected_donors_from_artifacts`, `read_core_cell_types`. |
+| `qc_tables.py` | Pure pandas, no plotting: `donor_qc_table`, `library_cell_summary`, `complete_donor_cell_type` (donor x cell type grid filled with zeros, plus an expected flag), `resolve_conditions`, `expected_donors_from_files`, `read_core_cell_types`. |
 | `plot_primitives.py` | Reusable matplotlib/seaborn page builders: `sorted_bar_with_median`, `bar_and_condition_box` (the two-panel library page), `box_with_points`, `dodged_bars`, `stacked_fraction_bars`, `faceted_sorted_bars` (independent y axis and median per panel, donors sorted within each panel), `faceted_box_by_condition`; `donor_palette(donors)`; `page_title(fig, analysis_id, subtitle)`. |
 | `library_reports.py` | `library_metrics_report` (with `LIBRARY_METRICS`, the declarative list) and `filtered_library_metrics_report` |
 | `donor_reports.py` | `donor_summary_report`, `donor_nuclei_counts_report` |
@@ -291,7 +327,7 @@ aggregation_qc
   --analysis-id    <id>     (titles and output file prefix; required)
   --output-dir     <dir>    (default .)
   --cell-type-column <col>  (optional; e.g. HMBA_Human_WB_v0.5_neighborhood_name)
-  --artifacts      <uei>.yaml [...]   (required; one artifact YAML per library -> donor_file)
+  --donor-file     <file> [...]   (optional; donor file of each library, local or gs://; without it no donor outputs)
   --conditions-file <tsv> | --condition-column <col>     (optional, mutually exclusive)
   --core-cell-types <file>  (optional; headerless list of core cell types, one per line)
   --umi-column     num_retained_transcripts
@@ -302,9 +338,9 @@ aggregation_qc
 ```
 
 Rules:
-- Every library in the cell metadata has an artifact YAML. A library without one is invalid
-  input (non-zero exit). Its `donor_file` can still be NA, for example a library that is not a
-  village; that is handled by the donor gate.
+- The donor files are compared by content. The caller passes the donor file of every library
+  or none, so a library without one (for example one that is not a village) is the caller's
+  decision to skip donor QC.
 - The conditions TSV has a header and exactly 2 columns, (library, condition). The column
   names are not checked, so legacy files work unchanged.
 - Exit status is non-zero for invalid input (a missing required column, a bad condition,
@@ -321,8 +357,8 @@ Rules:
 | `<id>.donor_cell_type_distributions.pdf` | donor gate and cell type gate |
 
 - **Donor gate:** the donor column exists in the cell metadata; at least one cell has a
-  donor; every library has a `donor_file` that is not NA; and every donor file has the same
-  set of donors.
+  donor; at least one `--donor-file` was given; and every donor file has the same set of
+  donors.
 - **Cell type gate:** `--cell-type-column` was given, the column exists, and at least one
   cell has a label. MMC may not have been run on every library: cells without a label are left
   out of the cell type pages, and their number is logged. On the two cell type pages of
@@ -354,9 +390,8 @@ In `dropseq/aggregation/locate_scRNA_artifacts.py`:
 - `pyproject.toml` `[project.scripts]`: add
   `aggregation_qc = "dropseq.aggregation.plots.aggregation_qc:main"`. Add `matplotlib` and
   `seaborn` to `dependencies` explicitly; today they only arrive through scanpy.
-- `/Users/nemesh/dropseqrna/transcriptome/python/src/dropseq/command_line_programs.tsv`
-  needs an `aggregation_qc` line so that deployments get a wrapper. That file is outside
-  this package, so ask the user before editing it.
+- `command_line_programs.tsv` (transcriptome repo) is not touched: the tool is run from the
+  Python image or with `uv`, not from a deployment wrapper.
 
 ---
 
@@ -371,7 +406,10 @@ Part 3, flat in `--outdir` with the legacy names. `<id>` is `params.analysis_id`
 - **Inputs** (typed records, like the other modules):
   - `<analysis>.cell_metadata.txt` (the `MERGE_CELL_METADATA` output)
   - `<analysis>.library_metrics.txt` (the `MERGE_LIBRARY_METRICS` output)
-  - all `artifacts/<uei>.yaml` from `LOCATE_SCRNA_ARTIFACTS`, collected into one list
+  - the donor files: the `donor_file` of each `artifacts/<uei>.yaml` from
+    `LOCATE_SCRNA_ARTIFACTS`, extracted in the workflow (Groovy, as the resolver reads the YAMLs),
+    as a list that is empty if any library has none; the files are staged by base name, so
+    two with one name need renaming, as for the joins
   - `params.analysis_id`
   - the cell type column name, as the channel value `DONOR_CELL_TYPE_REPORT` already gets;
     absent if the run has no MMC results
@@ -380,7 +418,7 @@ Part 3, flat in `--outdir` with the legacy names. `<id>` is `params.analysis_id`
   ```
   aggregation_qc \
       --cell-metadata ${cell_metadata} --library-metrics ${library_metrics} \
-      --artifacts ${artifacts} --analysis-id ${id} \
+      --donor-file ${donor_files} --analysis-id ${id} \    # only if there are donor files
       --cell-type-column '${cell_type_column}' \   # only if there is one
       --conditions-file ${conditions} \            # or --condition-column, never both
       --core-cell-types ${core_cell_types} \       # only if given
@@ -423,12 +461,12 @@ The expected donors come from `donor_file`, the new field of `locate_scRNA_artif
   (`modules/local/locate_scrna_artifacts/tests/fixtures/expected/LIB_A.yaml`) gain the
   `donor_file` line, and the fixture village `properties.yaml` (currently empty) needs a
   `donorFile`.
-- Regenerate `tests/live_data/baseline/artifacts/*.yaml`. The SMRI_V11 donor file is
+- `tests/live_data/baseline/artifacts/*.yaml` are regenerated (done; the baseline now has `donor_file`). The SMRI_V11 donor file is
   `gs://mccarroll_scrnaseq_central_temp/alecw/nextflow_inputs/2024-03-27_SMRI_V11.donors.txt`.
 - Check that `lib/LibraryResolver.groovy` does not assume a fixed field list.
-- `aggregation_qc` and `donor_file` only reach the container image once the Python side is
-  released. Update the image (and move the `prod` tag) before turning `run_qc` on in a real
-  run.
+- `aggregation_qc` and `donor_file` are in the public `current` image (digest in "Status and next step"). The
+  Nextflow modules use `current`, so `LOCATE_SCRNA_ARTIFACTS` already writes `donor_file`. Move the
+  `prod` tag of this repo before turning `run_qc` on in a real run.
 
 ### Docs to update when implemented
 `docs/output.md` (the new files), `docs/usage.md` (the params, an example, and a definition of core cell types with an example
@@ -446,13 +484,14 @@ completed items to `DONE.md`.
 ---
 
 ## Part 5: implementation steps
+Steps 1-7 are done (see "Status and next step").
 1. Keep this document in step with the code as decisions change.
-2. `locate_scRNA_artifacts`: add `donor_file`, with tests.
-3. `qc_tables.py`, with unit tests (hand-computed values on a small synthetic metadata table).
-4. `plot_primitives.py`, then the report modules; then `aggregation_qc.py` (CLI and gating).
-5. `pyproject.toml` entry point and dependencies; ask before touching `command_line_programs.tsv`.
-6. Visual review against the legacy PDFs (see Verification), then iterate on the styling.
-7. **Prototype script, before the Nextflow process.** Add an optional QC step to
+2. `locate_scRNA_artifacts`: add `donor_file`, with tests. (done)
+3. `qc_tables.py`, with unit tests (hand-computed values on a small synthetic metadata table). (done)
+4. `plot_primitives.py`, then the report modules; then `aggregation_qc.py` (CLI and gating). (done)
+5. `pyproject.toml` entry point and dependencies. (done)
+6. Visual review against the legacy PDFs (see Verification), then iterate on the styling. (done for the pages without cell types; the legacy cell type pages could not be compared, because the Zamboni data has no cell type labels)
+7. **Prototype script, before the Nextflow process.** (done) Add an optional QC step to
    `docs/specifications/scrna-aggregation_prototype.sh` (after the cell metadata and library
    metrics are written; it runs the `aggregation_qc` command in the Python container like the
    other Python tools), with the flags `--run-qc`, `--qc-conditions-file`,
@@ -475,20 +514,19 @@ completed items to `DONE.md`.
 
   Run them with `cd public/src/python; uv run python -m unittest discover -s tests/aggregation -t .`
 - End-to-end on the new baseline:
-  `uv run aggregation_qc --cell-metadata .../baseline/SMRI_V11.unfiltered.cell_metadata.txt --library-metrics .../baseline/SMRI_V11.unfiltered.library_metrics.txt --cell-type-column HMBA_Human_WB_v0.5_neighborhood_name --artifacts .../baseline/artifacts/SMRI_V11_rxn1.yaml --analysis-id SMRI_V11.unfiltered --output-dir <scratch>`.
-  First regenerate the artifact YAML so it has `donor_file`. The donor file is in GCS:
+  `uv run aggregation_qc --cell-metadata .../baseline/SMRI_V11.unfiltered.cell_metadata.txt --library-metrics .../baseline/SMRI_V11.unfiltered.library_metrics.txt --cell-type-column HMBA_Human_WB_v0.5_neighborhood_name --donor-file <local copy of the donor file> --analysis-id SMRI_V11.unfiltered --output-dir <scratch>`.
+  The donor file, also recorded as `donor_file` in the regenerated artifact YAML, is in GCS:
   `gs://mccarroll_scrnaseq_central_temp/alecw/nextflow_inputs/2024-03-27_SMRI_V11.donors.txt`.
 - Parity against the legacy run: run on the legacy v138 data, which has conditions and cell
   types, using the column-name options
   (`--donor-column DONOR --umi-column NUM_TRANSCRIPTS --cell-type-column predClass`) and the
-  v138 conditions file. Use a hand-written scratch artifact YAML whose `donor_file` lists the
-  v138 donors. Render both sets of PDFs with `pdftoppm` and compare them page by page. The
+  v138 conditions file. Use a donor file that lists the v138 donors. Render both sets of PDFs with `pdftoppm` and compare them page by page. The
   numbers should match the legacy PDFs except where a bug was deliberately fixed.
 - Nextflow candidate tests (to rank in the session):
   - module test of `AGGREGATION_QC` with a small fixture (a cell metadata table, a library
-    metrics table, two artifact YAMLs whose `donor_file` points to local files): the expected
+    metrics table, two local donor files): the expected
     files exist and the PDFs are non-empty
-  - donor gate: artifact YAMLs with different donor sets, or `donor_file: NA`, give no donor
+  - donor gate: different donor sets, or no donor file, give no donor
     files and a zero exit status
   - cell type gate: no cell type column gives no cell type PDFs
   - conditions from a file and from a column; both given fails in pre-flight

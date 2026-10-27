@@ -30,6 +30,13 @@ The pipeline produces the baseline result locally (docker), on Google Batch (`-p
 - **Public repo (`Drop-seq`, default branch `master`):** the tool came in with #590 (first version) and #591 (memory: numpy arrays instead of Python lists, 1.5 GB to 0.6 GB on a 6,000 x 20,000 synthetic DGE); #592 (merged) added `--uppercase-column` and plain string arrays. The downstream field list (`h5ad-required-fields.tsv`) needs `X` as CSR, `obs/CELL_BARCODE` and `var/gene_symbol`; fields that are optional or readable need nothing.
 - README figure moved out of the README: `docs/figures/workflow.mmd` (source, with the `h5ad` step) and `docs/figures/workflow.svg` (embedded in the README).
 
+## Aggregation QC: Python tool and prototype step (done, session 15)
+
+- **Python tool:** `aggregation_qc` (Drop-seq repo, package `dropseq.aggregation.plots`, PR #593, in the public `drop-seq_python:current` image) writes `<id>.donor_qc.txt` and 8 PDFs (library, donor and cell type QC) from the cell metadata and library metrics, with the donor files, cell type column, condition (TSV or column) and core cell types optional; skipped outputs are logged, not errors. `locate_scRNA_artifacts` records `donor_file` (the village `donorFile`).
+- **Prototype script:** optional step 10 (`--run-qc`, `--qc-conditions-file`, `--qc-condition-column`, `--qc-core-cell-types`); `SPEC_SUMMARY.md` and `testing.md` describe it.
+- **Validated:** the baseline was remade with `--image-tag current --run-qc` (donor file, all 8 PDFs); the other files equal the baseline without QC apart from the `donor_file` line of the artifact YAML. Compared with the legacy R plots on the Zamboni SMRI_V11 aggregation: identical `donor_qc` values, equivalent pages.
+- **Left:** the Nextflow process (`TODO.md`, `aggregation_qc_plan.md`).
+
 ## Work log
 
 ### A. Commit the work (done in session 7)

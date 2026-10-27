@@ -161,6 +161,21 @@ docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/ma
 
 It needs the prerequisites above plus `gcloud` on the host, and about 340 MB of scratch space for the reduced GTF (in `tests/live_data/baseline/tmp`).
 
+### Optional: QC plots in the baseline
+
+The prototype script has an optional last step, `aggregation_qc`, which writes `<analysis>.donor_qc.txt` and PDFs of library, donor and cell type QC into the output directory. It is off by default, so the baseline and the live tests are unaffected unless you ask for it:
+
+```bash
+docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml \
+    --analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current --run-qc
+```
+
+Options (see `--help`): `--qc-conditions-file FILE` or `--qc-condition-column COLUMN` (the condition of each library; not both) and `--qc-core-cell-types FILE` (one core cell type per line, with labels of the run's MapMyCells model and level). The expected donors come from the `donor_file` of each library's artifact YAML (its village `donorFile`); the donor outputs are skipped when a library has none or the libraries' donor files differ.
+
+`aggregation_qc` and the `donor_file` field are in the public `quay.io/broadinstitute/drop-seq_python:current` image (digest `sha256:05b95c05...`), so `--image-tag current` is enough; the baseline in use was made that way with `--run-qc`. To test unreleased Drop-seq Python code instead, build the images with the tag `jn_test` (from `transcriptome_java/public`: `docker build --platform linux/amd64 -f src/docker/python/Dockerfile -t quay.io/broadinstitute/drop-seq_python:jn_test .`, and the same with `src/docker/java/Dockerfile` and `drop-seq_java`) and pass `--image-tag jn_test`. The artifact YAMLs made with these images have a `donor_file` line (the `LOCATE_SCRNA_ARTIFACTS` live test and the baseline agree on it; its fixture test `modules/local/locate_scrna_artifacts/tests/main.nf.test` does not yet, see `specifications/aggregation_qc_plan.md`, "Status and next step").
+
+No nf-test covers the QC step yet, and the pipeline itself does not run it (planned: `aggregation_qc_plan.md`).
+
 ### Step 2: run the tests
 
 Needs the baseline from step 1, the credentials above and the project ID. Export the project ID once:
