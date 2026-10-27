@@ -184,9 +184,11 @@ Bugs seen in the rendered v138 PDFs:
      donor-level outputs**. Library-level and overall cell-type outputs are still produced.
    - An aggregation that mixes villages is legitimate; it just doesn't get donor QC.
 3. **Core cell types** (replaces the hard-coded "primary neuron" list).
-   - **What they are:** a few cell types that are well represented in the region and give a
-     stable per-donor median, so that donors can be compared on the same cell type. The user
-     chooses them for the tissue; an example is the striatal projection neurons.
+   - **What they are:** a few cell types that are consistently present in the tissue
+     measured, whatever the dissection, and so give a stable per-donor median. Other cell types
+     vary more between donors because dissections differ (which sub-regions were included), so
+     their per-donor values vary for that reason too, not only through RNA quality. The user
+     chooses the core cell types for the tissue; an example is the striatal projection neurons.
    - **What is computed:** for each donor, the median UMIs per nucleus (`--umi-column`) over
      the nuclei of each core cell type, and over all of them pooled. Nothing is normalised or
      divided by them: they are not a calibration and not a denominator. They answer "is this
@@ -403,7 +405,7 @@ Add them to `nextflow_schema.json` and `conf/params.config`.
 | `run_qc` | boolean, default false. Run the QC step. |
 | `qc_conditions_file` | optional TSV, a header and two columns (library, condition). The column names are not checked, so the legacy conditions files work unchanged. Every library must be in it. |
 | `qc_condition_column` | optional name of a cell-metadata column (for example one added by a manifest `joins`). It must have one value per library; the tool fails if not. Mutually exclusive with `qc_conditions_file`. |
-| `qc_core_cell_types` | optional file, headerless, one cell type per line: the core cell types of the tissue (a few well-represented types that give a stable per-donor median UMI, so donors can be compared on the same cell type; nothing is normalised by them). Each listed type present in the data gets a per-donor median UMI column and page, plus a pooled column. The labels must belong to the chosen MMC model and level, so a file is tied to one taxonomy level. |
+| `qc_core_cell_types` | optional file, headerless, one cell type per line: the core cell types of the tissue (a few types that are consistently present whatever the dissection, so their per-donor median UMI is comparable between donors; nothing is normalised by them). Each listed type present in the data gets a per-donor median UMI column and page, plus a pooled column. The labels must belong to the chosen MMC model and level, so a file is tied to one taxonomy level. |
 
 The UMI column is the tool's `--umi-column` (default `num_retained_transcripts`); it needs
 no param (use `ext.args` to change it).
