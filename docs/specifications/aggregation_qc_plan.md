@@ -183,14 +183,28 @@ Bugs seen in the rendered v138 PDFs:
    - If the sets differ, or some libraries have no donorFile, log it and skip **all
      donor-level outputs**. Library-level and overall cell-type outputs are still produced.
    - An aggregation that mixes villages is legitimate; it just doesn't get donor QC.
-3. **Focus cell types** (replaces the hard-coded "primary neuron" list). An optional,
-   reusable file: headerless, one cell type per line, for example a striatum list. Each listed
-   type that is present gets a donor_qc column and a per-donor page.
-   - Keep the legacy **pooled** column too: the median over all focus-type cells combined.
+3. **Core cell types** (replaces the hard-coded "primary neuron" list).
+   - **What they are:** a few cell types that are well represented in the region and give a
+     stable per-donor median, so that donors can be compared on the same cell type. The user
+     chooses them for the tissue; an example is the striatal projection neurons.
+   - **What is computed:** for each donor, the median UMIs per nucleus (`--umi-column`) over
+     the nuclei of each core cell type, and over all of them pooled. Nothing is normalised or
+     divided by them: they are not a calibration and not a denominator. They answer "is this
+     donor's RNA quality low in the same cell type as the other donors?", which the overall
+     median can't, because it also depends on the donor's cell-type mix.
+   - **Input:** an optional, reusable file, headerless, one cell type per line. Each listed
+     type that is present gets a `donor_qc` column and a per-donor page.
+   - **Legacy:** the hard-coded list was `glutamatergic, SPN, Upper.rhombic.lip` (scPred
+     labels). A core cell types file replaces it; for the legacy v138 data it would contain
+     `SPN`.
+   - Keep the legacy **pooled** column too: the median over all core-type cells combined.
      Its intent is unknown, and the user will ask users whether they need it.
    - Listed types that are absent from the data are logged.
    - The labels must match the cell type column (MMC model + level), so each list belongs to
      one taxonomy level.
+   - A median from only a few nuclei is noisy, and the legacy code did not guard against
+     it. This is an open question (a minimum number of nuclei per donor) and is not part of
+     this plan yet.
 4. **Output layout.** Keep the legacy **file names and page sets**, because users know them.
    Consolidating them is a later refactor.
 5. **UMI column.** A `--umi-column` param with default `num_retained_transcripts`
@@ -228,8 +242,8 @@ New subpackage `transcriptome_java/public/src/python/src/dropseq/aggregation/plo
 | File | Contents |
 |---|---|
 | `__init__.py` | empty (it uses the `logger` and `add_log_argument` from `dropseq.aggregation`) |
-| `aggregation_qc.py` | CLI `main()`. Reads and validates the inputs, resolves the condition / expected donors / focus types, decides which outputs are enabled (gating), and calls the reports. |
-| `qc_tables.py` | Pure pandas, no plotting: `donor_qc_table`, `library_cell_summary`, `complete_donor_cell_type` (donor x cell type grid filled with zeros, plus an expected flag), `resolve_conditions`, `expected_donors_from_artifacts`, `read_focus_cell_types`. |
+| `aggregation_qc.py` | CLI `main()`. Reads and validates the inputs, resolves the condition / expected donors / core cell types, decides which outputs are enabled (gating), and calls the reports. |
+| `qc_tables.py` | Pure pandas, no plotting: `donor_qc_table`, `library_cell_summary`, `complete_donor_cell_type` (donor x cell type grid filled with zeros, plus an expected flag), `resolve_conditions`, `expected_donors_from_artifacts`, `read_core_cell_types`. |
 | `plot_primitives.py` | Reusable matplotlib/seaborn page builders: `sorted_bar_with_median`, `bar_and_condition_box` (the two-panel library page), `box_with_points`, `dodged_bars`, `stacked_fraction_bars`, `faceted_sorted_bars` (independent y axis and median per panel, donors sorted within each panel), `faceted_box_by_condition`; `donor_palette(donors)`; `page_title(fig, analysis_id, subtitle)`. |
 | `library_reports.py` | `library_metrics_report` (with `LIBRARY_METRICS`, the declarative list) and `filtered_library_metrics_report` |
 | `donor_reports.py` | `donor_summary_report`, `donor_nuclei_counts_report` |
@@ -277,7 +291,7 @@ aggregation_qc
   --cell-type-column <col>  (optional; e.g. HMBA_Human_WB_v0.5_neighborhood_name)
   --artifacts      <uei>.yaml [...]   (required; one artifact YAML per library -> donor_file)
   --conditions-file <tsv> | --condition-column <col>     (optional, mutually exclusive)
-  --focus-cell-types <file>  (optional)
+  --core-cell-types <file>  (optional; headerless list of core cell types, one per line)
   --umi-column     num_retained_transcripts
   --donor-column   donor
   --library-column PREFIX            (cell metadata)
@@ -312,13 +326,13 @@ Rules:
   out of the cell type pages, and their number is logged. On the two cell type pages of
   `<id>.library_metrics.pdf`, a library with no labelled cells has 0 nuclei and no median UMI
   value. Unlike the legacy code, a few NA values don't disable the cell type outputs.
-- Focus outputs need both gates and a focus file.
+- Core cell type outputs need both gates and a core cell types file.
 - Condition pages need a condition.
 
 ### `donor_qc.txt` columns
 `donor num_nuclei fraction_nuclei total_umis_m median_umis_per_nucleus`, then, if there are
-focus types, `median_umis_per_focus_cell_type` (pooled) and one
-`median_umis_per_nucleus_<type>` per focus type present.
+core cell types, `median_umis_per_core_cell_type` (pooled) and one
+`median_umis_per_nucleus_<type>` per core cell type present.
 - Expected donors with no cells are included, with num_nuclei 0 and the other values NA.
 - Add an `expected` column (true/false), since the plots compute it anyway.
 - Rounding matches the legacy code: fraction to 3 decimal places, total_umis_m to 3.
@@ -367,7 +381,7 @@ Part 3, flat in `--outdir` with the legacy names. `<id>` is `params.analysis_id`
       --artifacts ${artifacts} --analysis-id ${id} \
       --cell-type-column '${cell_type_column}' \   # only if there is one
       --conditions-file ${conditions} \            # or --condition-column, never both
-      --focus-cell-types ${focus} \                # only if given
+      --core-cell-types ${core_cell_types} \       # only if given
       ${args}
   ```
 - **Outputs:** `*.pdf`, and `*.donor_qc.txt`, which only exists under the donor gate, so it is
@@ -389,16 +403,16 @@ Add them to `nextflow_schema.json` and `conf/params.config`.
 | `run_qc` | boolean, default false. Run the QC step. |
 | `qc_conditions_file` | optional TSV, a header and two columns (library, condition). The column names are not checked, so the legacy conditions files work unchanged. Every library must be in it. |
 | `qc_condition_column` | optional name of a cell-metadata column (for example one added by a manifest `joins`). It must have one value per library; the tool fails if not. Mutually exclusive with `qc_conditions_file`. |
-| `qc_focus_cell_types` | optional file, headerless, one cell type per line. Each listed type present in the data gets a per-donor median UMI column and page. The labels must belong to the chosen MMC model and level. |
+| `qc_core_cell_types` | optional file, headerless, one cell type per line: the core cell types of the tissue (a few well-represented types that give a stable per-donor median UMI, so donors can be compared on the same cell type; nothing is normalised by them). Each listed type present in the data gets a per-donor median UMI column and page, plus a pooled column. The labels must belong to the chosen MMC model and level, so a file is tied to one taxonomy level. |
 
 The UMI column is the tool's `--umi-column` (default `num_retained_transcripts`); it needs
 no param (use `ext.args` to change it).
 
 ### Pre-flight checks
 - `qc_conditions_file` and `qc_condition_column` given together: fail.
-- `qc_conditions_file`, `qc_condition_column` or `qc_focus_cell_types` given without
+- `qc_conditions_file`, `qc_condition_column` or `qc_core_cell_types` given without
   `run_qc`: warn (they are ignored).
-- `qc_focus_cell_types` given when there are no MMC results: warn.
+- `qc_core_cell_types` given when there are no MMC results: warn.
 
 ### Dependency on the artifact YAML
 The expected donors come from `donor_file`, the new field of `locate_scRNA_artifacts`
@@ -415,7 +429,8 @@ The expected donors come from `donor_file`, the new field of `locate_scRNA_artif
   run.
 
 ### Docs to update when implemented
-`docs/output.md` (the new files), `docs/usage.md` (the params and an example),
+`docs/output.md` (the new files), `docs/usage.md` (the params, an example, and a definition of core cell types with an example
+file),
 `docs/data_flow.md` and the README figure if the figure lists processes
 (`docs/figures/render.sh`), `SPEC_SUMMARY.md`, `CHANGELOG.md`; then move this plan's
 completed items to `DONE.md`.
@@ -439,7 +454,7 @@ completed items to `DONE.md`.
    `docs/specifications/scrna-aggregation_prototype.sh` (after the cell metadata and library
    metrics are written; it runs the `aggregation_qc` command in the Python container like the
    other Python tools), with the flags `--run-qc`, `--qc-conditions-file`,
-   `--qc-condition-column` and `--qc-focus-cell-types`. Then update `SPEC_SUMMARY.md`, which is
+   `--qc-condition-column` and `--qc-core-cell-types`. Then update `SPEC_SUMMARY.md`, which is
    derived from the script. This lets us run the code and the container image on the live test
    data (the SMRI_V11 baseline) before the Nextflow process exists, so problems in the tool or
    the image show up first.
@@ -447,7 +462,7 @@ completed items to `DONE.md`.
 
 ## Verification
 - Unit tests in `tests/aggregation/test_aggregation_qc.py` (and `test_qc_tables.py`):
-  - donor_qc values, the pooled and per-type focus columns, and zero rows for missing
+  - donor_qc values, the pooled and per-type core columns, and zero rows for missing
     expected donors
   - condition resolution: TSV, column, varies-within-library error, missing-library error
   - donor list consistency: same contents at different paths passes; a different set, or a
