@@ -1,0 +1,3 @@
+library	total_reads_M	pct_hq_mapped_reads	pct_chimeric_UMIs	n_STAMPs	median_cell_UMIs_cbrb
+LIB_A	2.5	90	0.5	100	95000
+LIB_B	3.5	88	0.7	120	110000

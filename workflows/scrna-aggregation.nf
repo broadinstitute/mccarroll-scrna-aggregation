@@ -15,6 +15,7 @@ include { MERGE_LIBRARY_METADATA as MERGE_LIBRARY_METRICS } from '../modules/loc
 include { MERGE_LIBRARY_METADATA as MERGE_CELL_METADATA } from '../modules/local/merge_library_metadata/main'
 include { BUILD_LIBRARY_H5AD } from '../modules/local/build_library_h5ad/main'
 include { MAKE_TRIPLET_DGE } from '../modules/local/make_triplet_dge/main'
+include { AGGREGATION_QC } from '../modules/local/aggregation_qc/main'
 include { DONOR_CELL_TYPE_REPORT } from '../modules/local/donor_cell_type_report/main'
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
 include { MAKE_METACELLS_FROM_TRIPLET_DGE as DONOR_CELL_TYPE_METACELLS } from '../modules/local/make_metacells_from_triplet_dge/main'
@@ -82,6 +83,10 @@ workflow SCRNA_AGGREGATION {
     manifest: Value<Manifest>      // one item: the aggregation YAML
     entries: Value<List<Map>>      // one item: the manifest entries [dge, donor, filters, joins], in manifest order
     mmc_model: String?             // --mmc_model, the MapMyCells model that replaces each library's first model
+    run_qc: Boolean                // --run_qc: run the optional aggregation QC step
+    qc_conditions_file: String?    // --qc_conditions_file: TSV (library, condition) for the QC, or null
+    qc_condition_column: String?   // --qc_condition_column: cell metadata column holding the condition of each library, or null
+    qc_core_cell_types: String?    // --qc_core_cell_types: file with one core cell type per line, or null
 
     main:
 
@@ -243,6 +248,13 @@ workflow SCRNA_AGGREGATION {
         }
     }
 
+    // The QC's core cell types are labels of a MapMyCells model and level: without MapMyCells results there is no cell type column to match them.
+    cell_type_column.subscribe { column ->
+        if (run_qc && qc_core_cell_types && !column) {
+            log.warn "--qc_core_cell_types is ignored by the QC: no library has MapMyCells results, so there is no cell type column"
+        }
+    }
+
     // Input: triplet (one item), merged_cell_metadata (one item) and the resolver result (donors yes or no).
     // Emits: one item only with donors, record(id: analysis id, matrix, features, barcodes, cell_metadata: path(merged cell metadata), has_donors).
     // A process takes a record with more fields than it declares, so these items go to the donor steps with only the fields they lack added.
@@ -270,6 +282,40 @@ workflow SCRNA_AGGREGATION {
     // per donor and cell type.
     donor_cell_type_report = DONOR_CELL_TYPE_REPORT(cell_type_inputs)
 
+    // The optional QC step (params.run_qc, off by default: then nothing below runs, nothing reads a donor file and nothing is warned about).
+    // Input: merged_cell_metadata, merged_metrics, the resolver's donor file paths (the distinct donor_file of the libraries' artifacts, [] if any
+    // library has none) and cell_type_column ('' for none), one item each; plus the QC parameters.
+    // Emits: one item only if run_qc, the input record of AGGREGATION_QC. donor_file is the first donor file if every donor file has the same donors
+    // (LibraryResolver.commonDonorFile reads them, local or gs://), else null (no donor outputs); the other optional values are null when not given.
+    qc_input = merged_cell_metadata
+        .map { item -> record(id: item.id, cell_metadata: item.combined) }
+        .combine(library_metrics: merged_metrics.map { item -> item.combined })
+        .combine(donor_files: resolved.map { result -> result.donorFiles })
+        .combine(cell_type_column: cell_type_column)
+        .flatMap { item ->
+            if (!run_qc) {
+                return []
+            }
+            def donor_path = LibraryResolver.commonDonorFile(item.donor_files, { path -> new String(java.nio.file.Files.readAllBytes(file(path)), 'UTF-8') })
+            return [
+                record(
+                    id: item.id,
+                    cell_metadata: item.cell_metadata,
+                    library_metrics: item.library_metrics,
+                    donor_file: donor_path ? file(donor_path) : null,
+                    cell_type_column: item.cell_type_column ?: null,
+                    conditions_file: qc_conditions_file ? file(qc_conditions_file) : null,
+                    condition_column: qc_condition_column ?: null,
+                    core_cell_types: qc_core_cell_types ? file(qc_core_cell_types) : null
+                )
+            ]
+        }
+
+    // Input: qc_input (one item with run_qc, else none).
+    // Emits: AGGREGATION_QC result, one item, record(id: analysis id, pdfs: the QC PDFs, donor_qc: path('<analysis>.donor_qc.txt') or null).
+    // Which files exist depends on the gates of the tool (a donor file, a cell type column).
+    aggregation_qc = AGGREGATION_QC(qc_input)
+
     // Emits: pipeline_info/scrna-aggregation_software_versions.yml: the pipeline and Nextflow versions. The tool versions are the image tags
     // hard coded in the modules, so no process reports a version.
     versions_file = WRITE_VERSIONS(channel.value(record(name: 'scrna-aggregation_software_versions.yml', text: workflowVersionToYAML().trim() + '\n')))
@@ -287,6 +333,8 @@ workflow SCRNA_AGGREGATION {
     barcodes: Value<Path> = triplet.map { item -> item.barcodes }
     features: Value<Path> = triplet.map { item -> item.features }
     donor_cell_type_report: Channel<Path> = donor_cell_type_report.map { item -> item.report }
+    qc_pdfs: Channel<Path> = aggregation_qc.flatMap { item -> item.pdfs }
+    qc_donor_qc: Channel<Path> = aggregation_qc.flatMap { item -> item.donor_qc ? [ item.donor_qc ] : [] }
     donor_metacells: Channel<Path> = donor_metacells.map { item -> item.metacells }
     donor_cell_type_metacells: Channel<Path> = donor_cell_type_metacells.map { item -> item.metacells }
     resolved_summary: Value<Path> = resolved_summary

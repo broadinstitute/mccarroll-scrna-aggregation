@@ -317,4 +317,82 @@ nextflow_pipeline {
             )
         }
     }
+
+    // The optional QC step. The synthetic libraries are not villages (their donor is in the manifest), so their artifacts have no donor_file:
+    // the QC has no expected donors. The donor outputs and reading a donor file are checked on the live data (pipeline.live.nf.test).
+    test("Should not run the QC step, and publish no QC file, unless run_qc is true") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_filters.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+                // given but ignored: no run_qc
+                qc_core_cell_types = "${synthetic()}/files/does_not_exist.txt"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def published = workflow.success ? out.list().toList() : []
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().size() > 0 && workflow.trace.tasks().every { !it.name.contains('AGGREGATION_QC') } },
+                { assert published.findAll { it.endsWith('.pdf') || it.endsWith('.donor_qc.txt') } == [] },
+                // the other results are there
+                { assert published.contains('SYN.cell_metadata.txt') }
+            )
+        }
+    }
+
+    test("Should run the QC step with run_qc and publish its PDFs, with no donor outputs when the libraries have no donor file") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_filters.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+                run_qc = true
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def published = workflow.success ? out.list().toList() : []
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().count { it.name.contains('AGGREGATION_QC') } == 1 },
+                // the library PDFs, and the overall cell type PDFs (the libraries have MapMyCells results); no donor file, so no donor outputs
+                { assert published.findAll { it.endsWith('.pdf') }.sort() == [
+                    'SYN.cell_type_counts.pdf', 'SYN.cell_type_median_UMIs.pdf', 'SYN.cell_type_proportions.pdf',
+                    'SYN.filtered_library_metrics.pdf', 'SYN.library_metrics.pdf' ] },
+                { assert !published.contains('SYN.donor_qc.txt') },
+                { assert published.contains('SYN.cell_metadata.txt') }
+            )
+        }
+    }
+
+    test("Should warn that the core cell types cannot be used when run_qc is true and no library has MapMyCells results") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_plain.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+                run_qc = true
+                qc_core_cell_types = "${synthetic()}/files/core_cell_types.txt"
+            }
+        }
+
+        then {
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            assertAll(
+                { assert workflow.success },
+                { assert log.contains('--qc_core_cell_types is ignored by the QC') }
+            )
+        }
+    }
 }

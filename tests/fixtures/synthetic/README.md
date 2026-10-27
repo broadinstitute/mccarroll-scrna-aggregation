@@ -26,6 +26,7 @@ To audit a run, look at `.nf-test/synthetic_root` (inputs), `.nf-test/tests/<tes
 | `manifest_mixed_donors.yaml` | LIB_MMC_1 with a donor and LIB_PLAIN_1 without: the resolver stops the run |
 | `manifest_missing_files.yaml` | PLAIN_2 and PLAIN_1 with a missing join file (from `dgeDefaults`) and a missing `includeFile`: the run stops before any process |
 | `manifest_duplicate_cell.yaml` | LIB_DUP alone |
+| `files/core_cell_types.txt` | `Glut`, for the QC test of `--qc_core_cell_types` (given with plain libraries, which have no cell type column: the run warns) |
 | `fake_credentials.json` | a fake service account key that only passes the pre-flight check |
 | `reference/REF/` | empty fasta, and a reduced GTF with GENEA GENEB GENEC |
 

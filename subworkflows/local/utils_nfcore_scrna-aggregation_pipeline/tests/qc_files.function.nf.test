@@ -1,0 +1,149 @@
+nextflow_function {
+
+    name "Test pre-flight check that the QC files can be read"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    function "checkQcFiles"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'preflight'
+    tag 'qc'
+
+    // Contract: checkQcFiles(Boolean runQc, String conditionsFile, String coreCellTypes)
+    //   - with runQc, each file that is given (local path or gs://) must be readable: a missing file, a directory or a file that cannot be
+    //     read calls error() naming the parameter and the path
+    //   - without runQc nothing is checked (the parameters are ignored, and checkQcParams warns about them); a null file is not checked
+
+    test("Should fail, naming the parameter and the path, when the conditions file does not exist") {
+
+        when {
+            function {
+                """
+                input[0] = true
+                input[1] = "${outputDir}/missing/conditions.tsv"
+                input[2] = null
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_conditions_file') },
+                { assert output.contains("${outputDir}/missing/conditions.tsv") }
+            )
+        }
+    }
+
+    test("Should fail, naming the parameter and the path, when the core cell types file does not exist") {
+
+        when {
+            function {
+                """
+                input[0] = true
+                input[1] = null
+                input[2] = "${outputDir}/missing/core.txt"
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_core_cell_types') },
+                { assert output.contains("${outputDir}/missing/core.txt") }
+            )
+        }
+    }
+
+    test("Should fail when a QC file is a directory") {
+
+        when {
+            function {
+                """
+                new File("${outputDir}/a_directory").mkdirs()
+                input[0] = true
+                input[1] = "${outputDir}/a_directory"
+                input[2] = null
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_conditions_file') && output.contains('a_directory') }
+            )
+        }
+    }
+
+    test("Should fail when a QC file exists but cannot be read") {
+
+        when {
+            function {
+                """
+                def f = new File("${outputDir}/unreadable/core.txt")
+                f.parentFile.mkdirs()
+                f.text = 'Glut\\\\n'
+                f.setReadable(false, false)
+                input[0] = true
+                input[1] = null
+                input[2] = f.toString()
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_core_cell_types') && output.contains('unreadable/core.txt') }
+            )
+        }
+    }
+
+    test("Should pass for readable files, an empty file and no files") {
+
+        when {
+            function {
+                """
+                def c = new File("${outputDir}/readable/conditions.tsv")
+                c.parentFile.mkdirs()
+                c.text = 'library\\\\tcondition\\\\nLIB_A\\\\tx\\\\n'
+                def e = new File("${outputDir}/readable/empty.txt")
+                e.text = ''
+                input[0] = true
+                input[1] = c.toString()
+                input[2] = e.toString()
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+
+    test("Should not check the files when run_qc is false, since the parameters are ignored") {
+
+        when {
+            function {
+                """
+                input[0] = false
+                input[1] = "${outputDir}/missing/conditions.tsv"
+                input[2] = "${outputDir}/missing/core.txt"
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success }
+            )
+        }
+    }
+}

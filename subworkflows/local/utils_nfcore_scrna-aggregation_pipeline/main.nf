@@ -57,6 +57,12 @@ workflow PIPELINE_INITIALISATION {
     checkLocalGcpCredentials(workflow.profile, params.gcp_credentials_file, System.getenv('GOOGLE_PROJECT_ID'))
 
     //
+    // Fail before any process starts if both QC condition parameters are given or a QC file cannot be read; warn about QC parameters that run_qc being false makes ignored
+    //
+    checkQcParams(params.run_qc, params.qc_conditions_file, params.qc_condition_column, params.qc_core_cell_types).each { warning -> log.warn warning }
+    checkQcFiles(params.run_qc, params.qc_conditions_file, params.qc_core_cell_types)
+
+    //
     // Print version and exit if required and dump pipeline parameters to JSON file
     //
     UTILS_NEXTFLOW_PIPELINE (
@@ -200,6 +206,49 @@ def checkLocalGcpCredentials(profile: String, credentialsFileParam: String?, pro
         error("A GCP project ID is required with Application Default Credentials. " +
             "Export GOOGLE_PROJECT_ID=<your project id> (the project ID, not the project number).")
     }
+}
+
+//
+// Check the parameters of the optional QC step, before any process runs.
+//   runQc: params.run_qc; conditionsFile, conditionColumn, coreCellTypes: params.qc_conditions_file, qc_condition_column, qc_core_cell_types (null if not given)
+//   returns: a warning for each QC parameter given while runQc is false (it is ignored); [] if none. Nothing is warned about when no QC parameter is given.
+//   Calls error() if both conditionsFile and conditionColumn are given: they are two ways to give the same condition of each library.
+//
+def checkQcParams(runQc: Boolean, conditionsFile: String?, conditionColumn: String?, coreCellTypes: String?) -> List<String> {
+    if (conditionsFile && conditionColumn) {
+        error("Give either --qc_conditions_file or --qc_condition_column, not both: they are two ways to give the condition of each library.")
+    }
+    if (runQc) {
+        return []
+    }
+    def ignored = conditionsFile ? [ '--qc_conditions_file' ] : []
+    def ignoredColumn = conditionColumn ? [ '--qc_condition_column' ] : []
+    def ignoredCore = coreCellTypes ? [ '--qc_core_cell_types' ] : []
+    return (ignored + ignoredColumn + ignoredCore).collect { name -> "${name} is ignored because --run_qc is not set" }.toList()
+}
+
+//
+// Check that the files of the QC parameters can be read, before any process runs (a missing file would otherwise fail the QC after all the other steps).
+//   runQc: params.run_qc; conditionsFile, coreCellTypes: params.qc_conditions_file and qc_core_cell_types (local or gs:// path, null if not given)
+//   returns: the paths checked ([] if none). Nothing is checked unless runQc is true (the parameters are ignored otherwise). Calls error() naming the parameter and the path for a file that
+//   does not exist, is a directory, or cannot be read (no permission, no access to the bucket).
+//
+def checkQcFiles(runQc: Boolean, conditionsFile: String?, coreCellTypes: String?) -> List<String> {
+    def conditions = runQc && conditionsFile ? [ checkReadable('--qc_conditions_file', conditionsFile) ] : []
+    def core = runQc && coreCellTypes ? [ checkReadable('--qc_core_cell_types', coreCellTypes) ] : []
+    return conditions + core
+}
+
+// Reads the file (these are small text files) and returns its path; error() naming the parameter and the path if that fails.
+def checkReadable(parameter: String, path: String) -> String {
+    try {
+        java.nio.file.Files.readAllBytes(file(path))
+    } catch (java.nio.file.NoSuchFileException _e) {
+        error("The file of ${parameter} was not found: '${path}'.")
+    } catch (IOException e) {
+        error("The file of ${parameter} cannot be read: '${path}' (${e.getMessage()}).")
+    }
+    return path
 }
 
 //
