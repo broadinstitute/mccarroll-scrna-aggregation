@@ -35,7 +35,15 @@ The pipeline produces the baseline result locally (docker), on Google Batch (`-p
 - **Python tool:** `aggregation_qc` (Drop-seq repo, package `dropseq.aggregation.plots`, PR #593, in the public `drop-seq_python:current` image) writes `<id>.donor_qc.txt` and 8 PDFs (library, donor and cell type QC) from the cell metadata and library metrics, with the donor files, cell type column, condition (TSV or column) and core cell types optional; skipped outputs are logged, not errors. `locate_scRNA_artifacts` records `donor_file` (the village `donorFile`).
 - **Prototype script:** optional step 10 (`--run-qc`, `--qc-conditions-file`, `--qc-condition-column`, `--qc-core-cell-types`); `SPEC_SUMMARY.md` and `testing.md` describe it.
 - **Validated:** the baseline was remade with `--image-tag current --run-qc` (donor file, all 8 PDFs); the other files equal the baseline without QC apart from the `donor_file` line of the artifact YAML. Compared with the legacy R plots on the Zamboni SMRI_V11 aggregation: identical `donor_qc` values, equivalent pages.
-- **Left:** the Nextflow process (`TODO.md`, `aggregation_qc_plan.md`).
+- **Left at the end of session 15:** the Nextflow process (done in session 16, below).
+
+## Aggregation QC: Nextflow process (session 16; the live test and the docs are left, see `TODO.md`; nothing committed)
+
+- **Fixtures and resolver:** the `LOCATE_SCRNA_ARTIFACTS` fixtures have the village `donorFile` and `donor_file` (6 of 6 module tests pass with the `current` image). `LibraryResolver.resolve()` returns `donorFiles`; `LibraryResolver.commonDonorFile(paths, read)` resolves them to the first file if all have the same donors (by content), else none. 2 new tests in `resolver.function.nf.test` (15 now).
+- **Module `AGGREGATION_QC`:** `modules/local/aggregation_qc/` with 5 fixture tests (all outputs and hand-computed `donor_qc.txt` values; a donor file with another name, order and CRLF; no donor file; no cell type column; a library missing from the conditions file fails). Fixtures in `tests/fixtures/` (README with the expected values).
+- **Params, edge, publishing:** `run_qc` (default false), `qc_conditions_file`, `qc_condition_column`, `qc_core_cell_types`; the edge in `workflows/scrna-aggregation.nf`; `qc_pdfs` and `qc_donor_qc` published flat. 2 synthetic pipeline tests (`run_qc` off: no QC task or file; on: one task, 5 PDFs and no `donor_qc.txt`, since the synthetic libraries have no `donor_file`).
+- **Pre-flight:** `checkQcParams` (5 tests), `checkQcFiles` (6 tests), a workflow warning for core cell types without MapMyCells results (1 synthetic test, read from `nextflow.log`), and 1 validation test (a missing QC file stops the run before any task).
+- **Checked:** `nextflow lint .` clean (55 files); the tests above pass. The whole suite and the live tests were not run after these changes.
 
 ## Work log
 

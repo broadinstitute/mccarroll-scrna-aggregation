@@ -22,13 +22,13 @@ Tests use [nf-test](https://www.nf-test.com) (0.9.5). Run everything from the re
 
 | What | Needs | Command |
 |---|---|---|
-| Unit tests of the Groovy code and pre-flight check (46) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (the live resolver test in that directory also needs the baseline) |
+| Unit tests of the Groovy code and pre-flight checks (59) | nothing | `nf-test test subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/` (the live resolver test in that directory also needs the baseline) |
 | Unit tests of one module | Docker (the public images; `WRITE_TEXT_FILE` needs nothing) | `nf-test test modules/local/<module>/tests/main.nf.test` |
-| Pipeline tests on synthetic libraries (9) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
-| Pipeline input validation and `--help` (6) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
+| Pipeline tests on synthetic libraries (12) | Docker only: no credentials, network or baseline | `nf-test test tests/pipeline.synthetic.nf.test` |
+| Pipeline input validation and `--help` (7) | `GOOGLE_PROJECT_ID`; no containers start | `nf-test test tests/pipeline.validation.nf.test` |
 | Live tests (12) | Docker, network, credentials, `GOOGLE_PROJECT_ID` and the baseline | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `nf-test test --tag live` (see [Live tests](#live-tests-real-data-compared-with-the-baseline)) |
 | Whole pipeline on Google Batch (a script, not an nf-test; costs a little money) | `nextflow`, `gsutil`, Application Default Credentials, `GOOGLE_PROJECT_ID`, `GOOGLE_LOCATION` and the baseline | `tests/batch_full_run/run.sh` (see [Whole pipeline on Google Batch](#whole-pipeline-on-google-batch)) |
-| Everything: 118 tests (the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
+| Everything: 140 tests expected (118 before the QC step, 22 added in session 16; the count has not been confirmed by a whole-suite run; the Google Batch script is not included) | the same as the live tests | `export GOOGLE_PROJECT_ID=bican-um1-mccarroll` once, then `tests/run_all_tests.sh` (checks the prerequisites first and stops at once with a clear message, for example "no baseline") |
 
 To run less: add the ID nf-test prints in brackets to select one test (`...main.nf.test@14bbfafa`; the ID changes if the test is renamed), `--dry-run` to list what would run, or select by tag (`live`, `gcs`, `pipeline_synthetic`). A plain `nf-test test` also runs the live tests, which fail without the baseline, so use the script or select by path. `nf-test.config` sets the default profile to `docker,test`. Test output goes to `.nf-test/` (git-ignored).
 
@@ -41,7 +41,9 @@ One line per unit; the fixtures and the exact assertions are in each unit's `tes
 | Pre-flight credentials check (`preflight.function.nf.test`) | 12 | fails before any process, naming the problem and the remedy, for a missing, unreadable, non-JSON, wrongly typed or incomplete credentials file, or no project ID; passes for valid `authorized_user` and `service_account` files; skipped without the `docker` profile |
 | Manifest parsing (`manifest.function.nf.test`) | 14 | `dgeDefaults` are projected deeply onto each entry; unknown keys, bad types, duplicate DGEs and line breaks in values are rejected with a message naming the entry; every missing file the manifest names (and every file that cannot be checked) is reported at once, with its key and entries |
 | `join_and_filter_tsv` arguments (`arguments.function.nf.test`) | 7 | donor, joins and filters become the right arguments in the right order (as the Python resolver writes them); files are staged once by base name; two files with one base name are rejected |
-| Library resolver (`resolver.function.nf.test`) | 13 | each manifest entry is matched to its artifact; libraries are in manifest order; one reference, one reduced GTF and one MapMyCells model are enforced; all libraries have donors or none; cell type column and staged-name checks |
+| Library resolver (`resolver.function.nf.test`) | 15 | each manifest entry is matched to its artifact; libraries are in manifest order; one reference, one reduced GTF and one MapMyCells model are enforced; all libraries have donors or none; cell type column and staged-name checks |
+| QC parameters and files (`qc_params.function.nf.test`, `qc_files.function.nf.test`) | 11 | both condition params fail; a QC param without `run_qc` warns that it is ignored; with `run_qc` a missing, directory or unreadable conditions or core cell types file fails naming the parameter and path; nothing is checked without `run_qc` |
+| `AGGREGATION_QC` | 5 | all 8 PDFs and `donor_qc.txt` with hand-computed values (nuclei, fractions, totals, medians, core cell type columns); a donor file with another name, order and CRLF; no donor file or no cell type column skips those outputs with exit 0; a library missing from the conditions file fails |
 | `LOCATE_SCRNA_ARTIFACTS` | 6 | one artifact YAML per library; missing optional artifacts are `NA`; the latest trace is chosen; a duplicate experiment fails |
 | `SUMMARIZE_SCRNA_EXPERIMENTS` | 2 | one metrics row and tearsheet per library with exact values; all-`NA` artifacts still succeed |
 | `WRITE_TEXT_FILE` | 2 | the text is written byte for byte; empty text gives an empty file |
@@ -52,11 +54,11 @@ One line per unit; the fixtures and the exact assertions are in each unit's `tes
 | `MAKE_TRIPLET_DGE` | 4 | prefixed barcodes in library order; only the cells in each barcode list; features; a duplicate barcode fails |
 | `DONOR_CELL_TYPE_REPORT` | 3 | counts, fractions and medians per donor and cell type; cells without a donor or cell type are handled as documented; a missing column fails |
 | `MAKE_METACELLS_FROM_TRIPLET_DGE` | 5 | sums per donor, and per donor and cell type; unmatched cells are in no metacell; the same barcode in two libraries stays separate; an unknown column fails |
-| Pipeline input validation and `--help` (`tests/pipeline.validation.nf.test`) | 6 | a missing manifest, a missing or unsafe analysis id and a manifest with an unknown key stop the run before any process; `--help` and `--help <parameter>` print the help |
+| Pipeline input validation and `--help` (`tests/pipeline.validation.nf.test`) | 7 | a missing manifest, a missing or unsafe analysis id and a manifest with an unknown key stop the run before any process; `--help` and `--help <parameter>` print the help |
 
 ## Pipeline tests on synthetic libraries
 
-`tests/pipeline.synthetic.nf.test` (9 tests): the whole pipeline on tiny local libraries, with real processes in Docker. They check what the live manifest (one library, no filters or joins) cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs. They are independent of the other tests: no `gs://`, no network, no credentials and no baseline (a fake service account key passes the pre-flight check, so `GOOGLE_PROJECT_ID` is not needed). Run them alone:
+`tests/pipeline.synthetic.nf.test` (12 tests; the last three are for the QC step: not run without `run_qc`, run with it and publishing its PDFs, and the warning for core cell types without MapMyCells results): the whole pipeline on tiny local libraries, with real processes in Docker. They check what the live manifest (one library, no filters or joins) cannot: several libraries, and the donor, filters and joins of the manifest reaching the merged outputs. They are independent of the other tests: no `gs://`, no network, no credentials and no baseline (a fake service account key passes the pre-flight check, so `GOOGLE_PROJECT_ID` is not needed). Run them alone:
 
 ```bash
 nf-test test tests/pipeline.synthetic.nf.test        # or: nf-test test --tag pipeline_synthetic

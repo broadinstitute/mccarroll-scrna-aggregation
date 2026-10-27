@@ -1,8 +1,6 @@
 # Plan: optional aggregation QC step
 
-Status: **the Python tool and the prototype-script step are done and validated (Part 5, steps 1-7); the Nextflow process (step 8) is not started.** Follow the process in `TODO.md` for the
-Nextflow part (clarification questions, data contract, severity-ranked candidate tests, then
-stop for the user's selection).
+Status: **the Python tool, the prototype-script step and, in this repo, the module `AGGREGATION_QC`, the params, the workflow edge, publishing and the pre-flight checks are done (Part 5, steps 1-7 and most of 8); the live test and the docs are left (step 8, `TODO.md`).** Follow the process in `TODO.md` (clarification questions, data contract, severity-ranked candidate tests, then stop for the user's selection).
 
 ## Status and next step
 
@@ -30,12 +28,19 @@ stop for the user's selection).
 - `--library-metrics` may name a library that has no cells in the cell metadata; with `--conditions-file` such a library needs a condition too, with `--condition-column` it is labelled `unknown`.
 - Outputs are flat in `--output-dir` with the legacy names. A skipped output exits 0 and is logged. Value labels follow R's formatting (4 significant digits, no trailing zeros).
 
-**Next: step 8, the Nextflow process** (Part 4), in this order:
-1. The `LOCATE_SCRNA_ARTIFACTS` module tests: with the new image `main.nf.test` "Should emit the expected artifact paths ..." fails because the expected
-   `fixtures/expected/LIB_A.yaml` and `LIB_B.yaml` lack `donor_file` (the live `gcs.nf.test` passes against the new baseline). Give the fixture village `properties.yaml` a
-   `donorFile` and the expected YAMLs the `donor_file` line (see "Dependency on the artifact YAML").
-2. Check that `lib/LibraryResolver.groovy` does not assume a fixed field list, then write the Groovy that collects each library's `donor_file` (none if any is NA or missing).
-3. The `AGGREGATION_QC` module, params, pre-flight checks, publishing, tests and docs of Part 4, following `TODO.md`.
+**Step 8, the Nextflow process** (Part 4), session 16:
+1. (done) The `LOCATE_SCRNA_ARTIFACTS` fixtures: the fixture village `properties.yaml` has a `donorFile` (`fixtures/donors/LIB_A.donors.txt`) and the expected YAMLs have `donor_file`.
+2. (done) `lib/LibraryResolver.groovy`: `resolve()` returns `donorFiles` (the distinct `donor_file` paths in manifest order; empty if any library has none). `commonDonorFile(paths, read)` resolves them to **one** file:
+   the first, if every file has the same set of donors (compared by content: one donor per line, order, blank lines, a final newline and CRLF do not matter), else null (no donor QC, not an error). It reads
+   the files, so the workflow calls it only when `run_qc` is true; without QC nothing is read and nothing is warned about. Different paths with one base name are not an error (only one file is staged).
+3. (done) Module `AGGREGATION_QC` (`modules/local/aggregation_qc/main.nf`): typed record input (`id, cell_metadata, library_metrics, donor_file?, cell_type_column?, conditions_file?, condition_column?, core_cell_types?`),
+   output `qc = record(id, pdfs: files("*.pdf"), donor_qc: file("<id>.donor_qc.txt", optional: true))`, `ext.args` and `ext.prefix`, a stub. 5 module tests with a synthetic fixture (hand-computed values).
+4. (done) Params `run_qc` (default false), `qc_conditions_file`, `qc_condition_column`, `qc_core_cell_types` (`conf/params.config`, the `params {}` block of `main.nf`, a "QC options" group of `nextflow_schema.json`), passed
+   through the `take:` of both workflows; the edge (`qc_input` and `AGGREGATION_QC` in `workflows/scrna-aggregation.nf`, one `flatMap` gated on `run_qc`); publishing (`qc_pdfs`, `qc_donor_qc`: emits, `publish:` and `output {}`, flat).
+5. (done) Pre-flight (`subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf`): `checkQcParams` (both condition params: fail; a QC param given without `run_qc`: warn that it is ignored), `checkQcFiles`
+   (with `run_qc`, a given conditions or core cell types file that is missing, a directory or unreadable fails, naming the parameter and the path; nothing is checked without `run_qc`), and in the workflow a warning
+   for `qc_core_cell_types` when no library has MapMyCells results.
+6. (left) The live test with the `gs://` donor file on the head node, the Google Batch script, then the docs: see `TODO.md`.
 
 ## Context
 
@@ -406,10 +411,10 @@ Part 3, flat in `--outdir` with the legacy names. `<id>` is `params.analysis_id`
 - **Inputs** (typed records, like the other modules):
   - `<analysis>.cell_metadata.txt` (the `MERGE_CELL_METADATA` output)
   - `<analysis>.library_metrics.txt` (the `MERGE_LIBRARY_METRICS` output)
-  - the donor files: the `donor_file` of each `artifacts/<uei>.yaml` from
-    `LOCATE_SCRNA_ARTIFACTS`, extracted in the workflow (Groovy, as the resolver reads the YAMLs),
-    as a list that is empty if any library has none; the files are staged by base name, so
-    two with one name need renaming, as for the joins
+  - the donor file: at most one, `LibraryResolver.commonDonorFile` applied to the `donorFiles` of
+    the resolver (the `donor_file` of each `artifacts/<uei>.yaml` from `LOCATE_SCRNA_ARTIFACTS`),
+    only when `params.run_qc` is true; absent if any library has none or the files have different
+    donors; libraries of one village, or files with the same donors, give the first file
   - `params.analysis_id`
   - the cell type column name, as the channel value `DONOR_CELL_TYPE_REPORT` already gets;
     absent if the run has no MMC results
@@ -418,7 +423,7 @@ Part 3, flat in `--outdir` with the legacy names. `<id>` is `params.analysis_id`
   ```
   aggregation_qc \
       --cell-metadata ${cell_metadata} --library-metrics ${library_metrics} \
-      --donor-file ${donor_files} --analysis-id ${id} \    # only if there are donor files
+      --donor-file ${donor_file} --analysis-id ${id} \    # only if there is a donor file
       --cell-type-column '${cell_type_column}' \   # only if there is one
       --conditions-file ${conditions} \            # or --condition-column, never both
       --core-cell-types ${core_cell_types} \       # only if given
@@ -448,8 +453,9 @@ Add them to `nextflow_schema.json` and `conf/params.config`.
 The UMI column is the tool's `--umi-column` (default `num_retained_transcripts`); it needs
 no param (use `ext.args` to change it).
 
-### Pre-flight checks
+### Pre-flight checks (implemented)
 - `qc_conditions_file` and `qc_condition_column` given together: fail.
+- With `run_qc`, a given `qc_conditions_file` or `qc_core_cell_types` that cannot be read (missing, a directory, no access; local or `gs://`): fail, naming the parameter and the path (added in session 16).
 - `qc_conditions_file`, `qc_condition_column` or `qc_core_cell_types` given without
   `run_qc`: warn (they are ignored).
 - `qc_core_cell_types` given when there are no MMC results: warn.
@@ -484,7 +490,7 @@ completed items to `DONE.md`.
 ---
 
 ## Part 5: implementation steps
-Steps 1-7 are done (see "Status and next step").
+Steps 1-7 are done (see "Status and next step"); step 8 is mostly done.
 1. Keep this document in step with the code as decisions change.
 2. `locate_scRNA_artifacts`: add `donor_file`, with tests. (done)
 3. `qc_tables.py`, with unit tests (hand-computed values on a small synthetic metadata table). (done)
@@ -499,7 +505,7 @@ Steps 1-7 are done (see "Status and next step").
    derived from the script. This lets us run the code and the container image on the live test
    data (the SMRI_V11 baseline) before the Nextflow process exists, so problems in the tool or
    the image show up first.
-8. The Nextflow process, params, pre-flight checks, fixtures and docs of Part 4.
+8. The Nextflow process, params, pre-flight checks, fixtures and docs of Part 4. (module, params, edge, publishing and pre-flight done in session 16; the live test and the docs are left)
 
 ## Verification
 - Unit tests in `tests/aggregation/test_aggregation_qc.py` (and `test_qc_tables.py`):
