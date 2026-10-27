@@ -13,7 +13,7 @@ nextflow_function {
     //     with a uei and a user_dge.
     //   resolve(List<Map> entries, List<Map> artifacts, String analysisId, Map options): entries from AggregationManifest.parse, artifacts from
     //     loadArtifact, options [mmcModel: String|null]. Returns [libraries: Map libraryId -> record in manifest order,
-    //     reducedGtf, reference, analysisId, hasDonors]; a record is [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
+    //     reducedGtf, reference, analysisId, hasDonors, donorFiles (the distinct donor_file paths in manifest order; empty if any library has none)]; a record is [libraryId, position, hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]. Missing values are 'NA'.
     //     The DGE of a library is the one the manifest names (the artifact's user_dge), whatever its type. A library has donors if its manifest entry
     //     names a donor or its artifacts have a village (village_properties); hasDonors is true if all have, and a mix is an error.
     //   summaryText(result): the plain text of <analysis>.resolved_libraries.txt, for a person to read (never parsed back).
@@ -431,6 +431,78 @@ nextflow_function {
                 { assert mixed != null && mixed.contains('LIB_A') && mixed.contains('LIB_B') && mixed.contains('Without') },
                 { assert mixedManifest != null && mixedManifest.contains('LIB_A') && mixedManifest.contains('LIB_B') },
                 { assert LibraryResolver.summaryText(noDonors).readLines()[3] == 'Donors:      no' }
+            )
+        }
+    }
+
+    test("Should list the donor files of the libraries for the QC: one path per distinct file, none if any library has none or the artifacts have no donor_file") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            def withFile = { String uei, String path -> artifact(uei, [donor_file: path]) }
+            // two libraries of one village share a donor file: listed once
+            def a = withFile('LIB_A', '/donors/v1.txt'); def b = withFile('LIB_B', '/donors/v1.txt')
+            def shared = resolve(entriesFor([a, b]), [a, b])
+            // one library has no donor file (NA): none at all, since a partial list would give a wrong set of expected donors
+            def c = withFile('LIB_A', '/donors/v1.txt'); def d = withFile('LIB_B', 'NA')
+            def partial = resolve(entriesFor([c, d]), [c, d])
+            // artifacts written before donor_file existed have no such key: none, not an error
+            def e = artifact('LIB_A'); def f = artifact('LIB_B')
+            def old = resolve(entriesFor([e, f]), [e, f])
+            // different paths with one base name are both kept: the QC process renames them when staging, and the tool compares the contents
+            def g = withFile('LIB_A', '/pool_a/donors.txt'); def h = withFile('LIB_B', '/pool_b/donors.txt')
+            def sameName = resolve(entriesFor([g, h]), [g, h])
+            assertAll(
+                { assert function.success },
+                { assert sameName.donorFiles == ['/pool_a/donors.txt', '/pool_b/donors.txt'] },
+                { assert shared.donorFiles == ['/donors/v1.txt'] },
+                { assert partial.donorFiles == [] },
+                { assert old.donorFiles == [] },
+                // the library records are unchanged
+                { assert shared.libraries.keySet() as List == ['LIB_A', 'LIB_B'] }
+            )
+        }
+    }
+
+    test("Should resolve the donor files to the first one when all have the same donors, and to none when the donors differ") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            // the contents by path; compared as sets of donors: order, blank lines, a missing final newline and CRLF line endings do not matter
+            def contents = [
+                '/pool_a/donors.txt': 'D1\nD2\nD3\n',
+                '/pool_b/donors.txt': 'D3\r\nD1\r\n\r\nD2',
+                '/pool_c/donors.txt': 'D1\nD2\nD4\n'
+            ]
+            def read = { String path -> contents[path] }
+            def reads = []
+            def counting = { String path -> reads << path; contents[path] }
+            assertAll(
+                { assert function.success },
+                // same donors under different names and paths: the first
+                { assert LibraryResolver.commonDonorFile(['/pool_a/donors.txt', '/pool_b/donors.txt'], read) == '/pool_a/donors.txt' },
+                { assert LibraryResolver.commonDonorFile(['/pool_b/donors.txt', '/pool_a/donors.txt'], read) == '/pool_b/donors.txt' },
+                // one donor differs: no common file, so no donor QC (not an error)
+                { assert LibraryResolver.commonDonorFile(['/pool_a/donors.txt', '/pool_c/donors.txt'], read) == null },
+                // no files: none, and one file is itself (read only to check that it can be)
+                { assert LibraryResolver.commonDonorFile([], read) == null },
+                { assert LibraryResolver.commonDonorFile(['/pool_a/donors.txt'], read) == '/pool_a/donors.txt' },
+                // every file is read once
+                { assert LibraryResolver.commonDonorFile(['/pool_a/donors.txt', '/pool_b/donors.txt'], counting) != null && reads == ['/pool_a/donors.txt', '/pool_b/donors.txt'] }
             )
         }
     }
