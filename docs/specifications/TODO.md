@@ -7,6 +7,9 @@ Only what is still to be done. Done work is in `DONE.md`; design decisions, gotc
 - Run what session 14 did not: the whole suite once (`tests/run_all_tests.sh`, 118 tests; session 14 ran the h5ad module tests (8), the synthetic pipeline tests (9) and the live pipeline test (2)) and the Google Batch check `tests/batch_full_run/run.sh`, which now also compares `h5ad/` with the baseline (edited, not run).
 - Delete the scratch data of the Google Batch checks: `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/{work,out}`, `gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/nf-test-batch-work/` and `gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work/`.
 
+## New feature: optional aggregation QC step
+The plan, with the decisions, the Python tool design, the Nextflow process and the order of work, is in `aggregation_qc_plan.md` (same directory). Not started. The Python tool (`aggregation_qc` in the Drop-seq repo) and the QC step of the prototype script come before the Nextflow process.
+
 ## Needs more data
 - **Tune memory** of the three Java steps (`MAKE_TRIPLET_DGE`, `DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`: now 15 GB, then 30 GB; the single live library peaked at 514 MB) and the default 6 GB of the other steps, with multi-library data sets on Google Batch. Keep the machine types in the `googlebatch` profile (`nextflow.config`) in step with the requests.
 
