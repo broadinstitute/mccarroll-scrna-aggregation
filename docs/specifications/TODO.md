@@ -11,12 +11,12 @@ Only what is still to be done. Done work is in `DONE.md`; design decisions, gotc
 ## Next
 1. After the merge of pull request 6, move the git tag `prod` (it is on `d76e217`, the merge of PR #4) so Seqera runs pick up the h5ad and QC steps. Do it before turning `run_qc` on in a real run.
 2. Publish the QC PDFs and `donor_qc.txt` in a `qc/` subdirectory (decided; now flat, with the legacy names). Update the outputs, the live test, `tests/google_cloud_batch_run/run.sh`, the baseline and the docs.
-3. Delete the scratch data of the Google Batch checks: `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/{work,out}`, `gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/nf-test-batch-work/` and `gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work/`.
 
 ## Needs more data
 - **Tune memory** of the three Java steps (`MAKE_TRIPLET_DGE`, `DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`: now 15 GB, then 30 GB; the single live library peaked at 514 MB) and the default 6 GB of the other steps, with multi-library data sets on Google Batch. Keep the machine types in the `googlebatch` profile (`nextflow.config`) in step with the requests.
 
 ## Optional / ideas
+- A manifest `donor` for a single-donor library (not a village): it works if the library's cell metadata has no `donor` column, and fails in `BUILD_LIBRARY_CELL_METADATA` ("the input file already has a column named donor") if donor assignment was run with one donor. Very rare; unknown which the real data will be. If it matters, check the column early and give a clearer message.
 - QC tests not written: a module test with a different set of donors across libraries is resolver-level only (`commonDonorFile` returns none, so no donor outputs; tested in `resolver.function.nf.test`), with no end-to-end test; tests 5 (conditions from a column), 7 (core cell types with an absent type), 8 and 9 (stub) of the `AGGREGATION_QC` candidate list were not selected.
 - A helper function for the "join with the libraries, collect, then `toSorted` by `position`" step (`metrics_sorted`, `built_sorted`). Check first that a typed function can read record fields (`a.position`) without a lint error.
 - `modules.json` lists nf-core pieces only; `CHANGELOG.md` has one entry.
