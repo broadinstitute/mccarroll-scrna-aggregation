@@ -69,12 +69,12 @@ nextflow_process {
         }
     }
 
-    test("Should apply the donor override and filters of the arguments file, including a filter on a MapMyCells column") {
+    test("Should add the donor and apply the filters of the arguments file, including a filter on a MapMyCells column") {
 
         when {
             process {
                 """
-                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args: file("${moduleDir}/tests/fixtures/args_donor_filters.txt").readLines(), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd_no_donor.tsv"), mmc_tsv: file("${moduleDir}/tests/fixtures/mmc.tsv"), args: file("${moduleDir}/tests/fixtures/args_donor_filters.txt").readLines(), extra_files: [])
                 """
             }
         }
@@ -87,7 +87,7 @@ nextflow_process {
                 // CCCC removed by --max pct_mt 0.1 (0.25); GGGG removed by --exclude M_class_name GABA (a column of the MapMyCells join, which comes first)
                 { assert lines.size() == 2 },
                 { assert lines[1][header.indexOf('cell_barcode')] == 'AAAA' },
-                // donor overridden by --set; PREFIX stays the library id
+                // donor added by --set (the input has no donor column: --set never replaces data); PREFIX stays the library id
                 { assert lines[1][header.indexOf('donor')] == 'N1' },
                 { assert lines[1][header.indexOf('PREFIX')] == 'LIB_A' },
                 { assert lines[1][header.indexOf('M_class_name')] == 'Glut' }
@@ -121,7 +121,7 @@ nextflow_process {
         when {
             process {
                 """
-                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_special_value.txt").readLines(), extra_files: [])
+                input[0] = record(id: 'LIB_A', cell_metadata: file("${moduleDir}/tests/fixtures/cmd_no_donor.tsv"), mmc_tsv: null, args: file("${moduleDir}/tests/fixtures/args_special_value.txt").readLines(), extra_files: [])
                 """
             }
         }

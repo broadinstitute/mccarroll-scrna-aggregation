@@ -328,7 +328,8 @@ nextflow_pipeline {
                 manifest = "${synthetic()}/manifest_filters.yaml"
                 analysis_id = 'SYN'
                 gcp_credentials_file = "${synthetic()}/fake_credentials.json"
-                // given but ignored: no run_qc
+                // the tests turn QC on in tests/nextflow.config: off here, as it is by default; the QC param below is given but ignored
+                run_qc = false
                 qc_core_cell_types = "${synthetic()}/files/does_not_exist.txt"
             }
         }

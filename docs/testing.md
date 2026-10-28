@@ -33,6 +33,7 @@ There are four kinds of tests:
 
 ## Where the tests are
 
+- The pipeline tests run the QC step by default: `tests/nextflow.config` sets `run_qc = true`, while the pipeline default (`conf/params.config`) is `false`. A test that checks the default sets `run_qc = false` itself.
 - Unit tests sit next to the unit, as in nf-core: `modules/local/<tool>/tests/main.nf.test`, with a `nextflow.config` and a `fixtures/` directory beside it. Tests of the Groovy code and the pre-flight checks are in `subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/tests/`.
 - Pipeline-level tests are in the top-level `tests/`: `pipeline.synthetic.nf.test`, `pipeline.validation.nf.test` and `pipeline.live.nf.test`.
 - Test names start with `Should ...`.
