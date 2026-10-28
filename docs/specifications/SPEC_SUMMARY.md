@@ -20,9 +20,9 @@ donor x cell-type metacells.
 | --mmc-model / --mmc-level | optional | params.mmc_model / mmc_level |
 | --reference | optional | none: libraries with different references fail in the resolver |
 | --java-memory | `-m` for Java tools | none: the JVM heap is 80% of `task.memory` (15 GB, then 30 GB, for the three Java steps in `conf/modules.config`) |
-| --run-qc | run the optional QC step 10 (a boolean flag) | none yet: planned as `params.run_qc` (`aggregation_qc_plan.md`) |
-| --qc-conditions-file / --qc-condition-column | condition of each library, from a TSV (header, library and condition) or from a cell metadata column; not both | planned: `params.qc_conditions_file` / `qc_condition_column` |
-| --qc-core-cell-types | headerless list of the core cell types, one per line | planned: `params.qc_core_cell_types` |
+| --run-qc | run the optional QC step 10 (a boolean flag) | `params.run_qc` |
+| --qc-conditions-file / --qc-condition-column | condition of each library, from a TSV (header, library and condition) or from a cell metadata column; not both | `params.qc_conditions_file` / `qc_condition_column` |
+| --qc-core-cell-types | headerless list of the core cell types, one per line | `params.qc_core_cell_types` |
 | (none) | GCP credentials mounted into the containers | params.gcp_credentials_file (docker profile only; default: your Application Default Credentials) |
 
 Containers: python tools `quay.io/broadinstitute/drop-seq_python:current`; java tools `quay.io/broadinstitute/drop-seq_java:current` (both public; the

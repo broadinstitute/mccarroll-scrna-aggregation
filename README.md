@@ -17,6 +17,7 @@ The main steps are:
 4. Write an h5ad file for each library (`BUILD_LIBRARY_H5AD`, in `h5ad/`): its counts, with its cell metadata as `obs` and the gene IDs and symbols as `var`.
 5. Merge the cell metadata (`MERGE_CELL_METADATA`) and the DGEs into one sparse matrix (`MAKE_TRIPLET_DGE`).
 6. With donors: the donor by cell type report (`DONOR_CELL_TYPE_REPORT`) and the donor and donor by cell type metacells (`DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`).
+7. Optionally (`--run_qc true`): PDFs of library, donor and cell type QC and `donor_qc.txt` (`AGGREGATION_QC`).
 
 ![Workflow of the pipeline: the manifest is checked and the artifacts located; each library is summarized and gets its cell metadata and its h5ad file; the libraries are then merged and the donor steps run](docs/figures/workflow.svg)
 

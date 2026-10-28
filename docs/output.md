@@ -13,6 +13,7 @@ The pipeline is built using [Nextflow](https://www.nextflow.io/) and processes d
 
 
 - [Library results](#library-results) - What was located, summarized and built for each library, and the merged metrics
+- [QC results](#qc-results) - The optional QC report (only with `--run_qc`)
 - [Pipeline information](#pipeline-information) - Report metrics generated during the workflow execution, and the record of what each library was processed from
 
 
@@ -43,6 +44,24 @@ produces (its metrics row, its joined and filtered cell metadata, its MapMyCells
 
 Either all libraries have donors (a `donor` in the manifest entry, or a village in the artifacts) or none do; a mix stops the run. Without donors, or without a
 cell type column, the steps that need them are skipped with a warning.
+
+</details>
+
+### QC results
+
+<details markdown="1">
+<summary>Output files</summary>
+
+Only with `--run_qc true`. The files are flat in the output directory, next to the merged results, and are named after the analysis id. Which of them exist depends on the inputs: the tool
+writes what it can and logs each output it skips (it still succeeds).
+
+- `<analysis>.library_metrics.pdf`, `<analysis>.filtered_library_metrics.pdf` - the library metrics, per library (always).
+- `<analysis>.donor_qc.txt` - one row per donor (the expected donors, also those with no cells): `num_nuclei`, `fraction_nuclei`, `total_umis_m` (millions), `median_umis_per_nucleus` and `expected`, plus a median UMI column for each core cell type present (only with donors, see below).
+- `<analysis>.donor_summary.pdf`, `<analysis>.donor_nuclei_counts.pdf` - donor level QC pages (only with donors).
+- `<analysis>.cell_type_counts.pdf`, `<analysis>.cell_type_median_UMIs.pdf`, `<analysis>.cell_type_proportions.pdf` - nuclei, median UMIs and proportions by cell type, per condition if conditions are given (only with a cell type column). Cells without a cell type are left out, so a proportion is a fraction of the labelled nuclei.
+- `<analysis>.donor_cell_type_distributions.pdf` - the distribution over cell types of each donor (only with donors and a cell type column).
+
+Donor outputs need donors that are the same in every library: the donor file of each library (`donor_file` in its artifacts) must list the same donors. If the libraries do not have donor files, or the lists differ, the donor outputs are skipped without an error.
 
 </details>
 

@@ -58,6 +58,34 @@ MapMyCells model instead of each library's first one (the libraries that have Ma
 by the workflow right after the artifacts are located; the run stops with the reason if they cannot be aggregated together. `<outdir>/pipeline_info/<analysis>.resolved_libraries.txt`
 is a plain-text record of what each manifest entry resolved to: the DGE, cell metadata, MapMyCells result, extra files and `join_and_filter_tsv` arguments of every library.
 
+## Optional QC report
+
+`--run_qc true` adds a last step (`AGGREGATION_QC`) that writes PDFs of library, donor and cell type quality, and `<analysis>.donor_qc.txt`; see [output.md](output.md#qc-results). It is off by default, and the other QC parameters are ignored (with a warning) unless `run_qc` is true.
+
+| Parameter | Meaning |
+|---|---|
+| `--run_qc` | `true` to run the QC step (default `false`). |
+| `--qc_conditions_file` | TSV with a header and two columns, `library` and `condition`; every library must be in it. The cell type pages are then drawn per condition. |
+| `--qc_condition_column` | Instead of the file: the name of a cell metadata column that has one value per library. Never together with `--qc_conditions_file`. |
+| `--qc_core_cell_types` | Headerless file, one core cell type per line, spelled as the labels of the MapMyCells model and level in use. |
+
+**Core cell types** are a few cell types that are consistently present in the tissue whatever the dissection, so their per-donor median UMIs are comparable between donors (other cell types vary with which sub-regions were dissected). The report gives each donor's median UMIs per nucleus in each core cell type and in all of them together, in `donor_qc.txt` and in a page per type. Nothing is normalised or divided by them. They answer "is this donor's RNA quality low in the same cell type as the other donors?", which the overall median cannot, because it depends on the donor's cell type mix. Example file for striatum:
+
+```
+SPN
+```
+
+(One cell type per line; list as many as the tissue needs.) A listed type that is absent from the data gets no column or page.
+
+Example:
+
+```bash
+nextflow run mccarroll/scrna-aggregation --manifest ./manifest.yaml --analysis_id MY_ANALYSIS --outdir ./results \
+    --run_qc true --qc_conditions_file ./conditions.tsv --qc_core_cell_types ./core_cell_types.txt -profile docker
+```
+
+A given conditions or core cell types file that does not exist fails before any process starts. The donor outputs need the donor file of every library to list the same donors (see [output.md](output.md#qc-results)).
+
 ## Running the pipeline
 
 The typical command for running the pipeline is as follows:

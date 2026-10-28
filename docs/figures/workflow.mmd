@@ -43,6 +43,12 @@ flowchart TD
     has_cell_type --> cell_type_metacells
     has_cell_type --> report
 
+    qc{"run_qc?"}:::gate
+    aggqc["AGGREGATION_QC<br/>PDFs + donor_qc.txt"]
+    merge_cells --> qc
+    merge_metrics --> qc
+    qc --> aggqc
+
     out_artifacts[("artifacts/")]:::output
     out_summary[("pipeline_info/<br/>ID.resolved_libraries.txt")]:::output
     out_tearsheets[("tearsheets/")]:::output
@@ -53,6 +59,7 @@ flowchart TD
     out_donor[("ID.donors.metacells.txt.gz")]:::output
     out_cell_type[("ID.donor_cell_type.metacells.txt.gz")]:::output
     out_report[("ID.donor_cell_type.txt")]:::output
+    out_qc[("ID.*.pdf<br/>ID.donor_qc.txt")]:::output
 
     locate -.-> out_artifacts
     resolve -.-> out_summary
@@ -64,6 +71,7 @@ flowchart TD
     donor_metacells -.-> out_donor
     cell_type_metacells -.-> out_cell_type
     report -.-> out_report
+    aggqc -.-> out_qc
 
     classDef default fill:#ffffff,stroke:#333333,color:#111111
     classDef input fill:#eef3fb,stroke:#4a6fa5,color:#111111
