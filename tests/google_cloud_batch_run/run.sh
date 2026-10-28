@@ -73,18 +73,21 @@ qc_pdfs=()
 for n in library_metrics filtered_library_metrics donor_summary donor_nuclei_counts cell_type_counts cell_type_median_UMIs cell_type_proportions donor_cell_type_distributions; do
   qc_pdfs+=("$ANALYSIS.$n.pdf")
 done
-[[ -f $RUN/out/$ANALYSIS.donor_qc.txt && -f $BASELINE/$ANALYSIS.donor_qc.txt && $(content_md5 "$RUN/out/$ANALYSIS.donor_qc.txt") == "$(content_md5 "$BASELINE/$ANALYSIS.donor_qc.txt")" ]]
-check $? "$ANALYSIS.donor_qc.txt equals the baseline"
+[[ -f $RUN/out/qc_plots/$ANALYSIS.donor_qc.txt && -f $BASELINE/qc_plots/$ANALYSIS.donor_qc.txt && $(content_md5 "$RUN/out/qc_plots/$ANALYSIS.donor_qc.txt") == "$(content_md5 "$BASELINE/qc_plots/$ANALYSIS.donor_qc.txt")" ]]
+check $? "qc_plots/$ANALYSIS.donor_qc.txt equals the baseline"
 for f in "${qc_pdfs[@]}"; do
-  [[ -s $RUN/out/$f && $(head -c 4 "$RUN/out/$f") == "%PDF" ]]
-  check $? "$f exists, is not empty and starts with %PDF"
+  [[ -s $RUN/out/qc_plots/$f && $(head -c 4 "$RUN/out/qc_plots/$f") == "%PDF" ]]
+  check $? "qc_plots/$f exists, is not empty and starts with %PDF"
 done
+expected_qc=$(printf '%s\n' "$ANALYSIS.donor_qc.txt" "${qc_pdfs[@]}" | sort)
+[[ $expected_qc == "$(ls "$RUN/out/qc_plots" | sort)" ]]
+check $? "qc_plots/ is exactly donor_qc.txt and the 8 PDFs"
 
 # 2. exact top-level listing
-expected=$(printf '%s\n' "${merged[@]}" "$ANALYSIS.donor_qc.txt" "${qc_pdfs[@]}" artifacts tearsheets h5ad pipeline_info | sort)
+expected=$(printf '%s\n' "${merged[@]}" qc_plots artifacts tearsheets h5ad pipeline_info | sort)
 actual=$(ls "$RUN/out" | sort)
 [[ $expected == "$actual" ]]
-check $? "the top level of --outdir is exactly the merged files, the QC files, artifacts/, tearsheets/, h5ad/ and pipeline_info/"
+check $? "the top level of --outdir is exactly the merged files, qc_plots/, artifacts/, tearsheets/, h5ad/ and pipeline_info/"
 [[ $expected == "$actual" ]] || diff <(echo "$expected") <(echo "$actual")
 
 # 3 and 4. the trace (tab separated, columns found by name). The trace has no executor field: a task submitted to Google Batch has a job id in

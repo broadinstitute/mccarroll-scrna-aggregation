@@ -57,7 +57,7 @@ themselves (locate_scRNA_artifacts, summarize_scRNA_experiments) get credentials
 `ID.library_metrics.txt`, `tearsheets/<lib>.standard_analysis_tearsheet.txt`, `<lib>.joined_filtered_cell_metadata.txt`,
 `ID.make_triplet_dge.yaml`, `ID.cell_type_column.txt` (only with MapMyCells results; added to the prototype 2026-10-16), `matrix.mtx.gz`, `barcodes.tsv.gz`, `features.tsv.gz`, `ID.cell_metadata.txt`,
 `ID.donor_cell_type.txt`, `ID.donors.metacells.txt.gz`, `ID.donor_cell_type.metacells.txt.gz`, `h5ad/<lib>.h5ad`
-and, only with `--run-qc`, `ID.donor_qc.txt`, `ID.library_metrics.pdf`, `ID.filtered_library_metrics.pdf`, `ID.donor_summary.pdf`,
+and, only with `--run-qc`, in `qc_plots/`: `ID.donor_qc.txt`, `ID.library_metrics.pdf`, `ID.filtered_library_metrics.pdf`, `ID.donor_summary.pdf`,
 `ID.donor_nuclei_counts.pdf`, `ID.cell_type_counts.pdf`, `ID.cell_type_median_UMIs.pdf`, `ID.cell_type_proportions.pdf` and
 `ID.donor_cell_type_distributions.pdf` (+ intermediate `artifacts/`, `resolved_manifest/`).
 

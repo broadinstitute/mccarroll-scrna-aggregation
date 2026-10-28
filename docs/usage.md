@@ -60,7 +60,7 @@ is a plain-text record of what each manifest entry resolved to: the DGE, cell me
 
 ## Optional QC report
 
-`--run_qc true` adds a last step (`AGGREGATION_QC`) that writes PDFs of library, donor and cell type quality, and `<analysis>.donor_qc.txt`; see [output.md](output.md#qc-results). It is off by default, and the other QC parameters are ignored (with a warning) unless `run_qc` is true.
+`--run_qc true` adds a last step (`AGGREGATION_QC`) that writes PDFs of library, donor and cell type quality, and `<analysis>.donor_qc.txt`, all in `qc_plots/` of the output directory; see [output.md](output.md#qc-results). It is off by default, and the other QC parameters are ignored (with a warning) unless `run_qc` is true.
 
 | Parameter | Meaning |
 |---|---|

@@ -64,7 +64,7 @@
             "title": "QC options",
             "type": "object",
             "fa_icon": "fas fa-chart-bar",
-            "description": "The optional aggregation QC step: PDFs of library, donor and cell type QC and donor_qc.txt, published flat in the output directory.",
+            "description": "The optional aggregation QC step: PDFs of library, donor and cell type QC and donor_qc.txt, published in the qc_plots directory of the output directory.",
             "properties": {
                 "run_qc": {
                     "type": "boolean",

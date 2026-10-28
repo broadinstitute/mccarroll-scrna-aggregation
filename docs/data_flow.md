@@ -83,7 +83,7 @@ declared in `workflows/scrna-aggregation.nf` for each library, and the process i
                         |  only if run_qc (off by default); one flatMap gated on run_qc
                         +--> [process] AGGREGATION_QC (merged cell metadata, <analysis>.library_metrics.txt; optional: donor file from LibraryResolver.commonDonorFile, cell type column, conditions file or column, core cell types)
                                   cmd: aggregation_qc --cell-metadata --library-metrics --analysis-id [--donor-file] [--cell-type-column] [--conditions-file | --condition-column] [--core-cell-types]
-                                  out: qc_pdfs (*.pdf) and qc_donor_qc (<analysis>.donor_qc.txt, optional) ==> flat in outdir
+                                  out: qc_pdfs (*.pdf) and qc_donor_qc (<analysis>.donor_qc.txt, optional) ==> qc_plots/ in outdir
 ```
 
 ## How the arguments reached `join_and_filter_tsv`, before and after

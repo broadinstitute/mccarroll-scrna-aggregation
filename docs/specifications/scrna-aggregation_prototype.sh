@@ -299,14 +299,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------------------------
-# 10. Optional QC: <analysis>.donor_qc.txt and PDFs of library, donor and cell type QC, written to OUT_DIR.
+# 10. Optional QC: <analysis>.donor_qc.txt and PDFs of library, donor and cell type QC, written to OUT_DIR/qc_plots.
 #     The expected donors are the donor_file of each library's artifact YAML (the donorFile of its village), which
 #     is passed only if every library has one: aggregation_qc skips the donor outputs without it, or if the libraries'
 #     donor files differ.  Files given on the command line are copied to TMP_DIR, which the container can read.
 # ---------------------------------------------------------------------------------------------------------------
 if [[ -n $RUN_QC ]]; then
   qc_dir=$TMP_DIR/qc
-  mkdir -p "$qc_dir"
+  mkdir -p "$qc_dir" "$OUT_DIR/qc_plots"
   qc_args=()
   donor_files=() all_have_donor_file=1
   for i in "${!LIBRARIES[@]}"; do
@@ -334,7 +334,7 @@ if [[ -n $RUN_QC ]]; then
     qc_args+=(--core-cell-types "$qc_dir/core_cell_types.txt")
   fi
   py aggregation_qc --cell-metadata "$CELL_METADATA" --library-metrics "$PREFIX.library_metrics.txt" \
-    --analysis-id "$ANALYSIS_ID" --output-dir "$OUT_DIR" "${qc_args[@]}"
+    --analysis-id "$ANALYSIS_ID" --output-dir "$OUT_DIR/qc_plots" "${qc_args[@]}"
 fi
 
 log "Done: $OUT_DIR"

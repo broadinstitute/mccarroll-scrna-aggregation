@@ -59,7 +59,7 @@ flowchart TD
     out_donor[("ID.donors.metacells.txt.gz")]:::output
     out_cell_type[("ID.donor_cell_type.metacells.txt.gz")]:::output
     out_report[("ID.donor_cell_type.txt")]:::output
-    out_qc[("ID.*.pdf<br/>ID.donor_qc.txt")]:::output
+    out_qc[("qc_plots/<br/>ID.*.pdf<br/>ID.donor_qc.txt")]:::output
 
     locate -.-> out_artifacts
     resolve -.-> out_summary

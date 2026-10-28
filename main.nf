@@ -198,9 +198,9 @@ output {
     barcodes                  { path '.' }
     features                  { path '.' }
     donor_cell_type_report    { path '.' }
-    // the optional QC step (run_qc): the PDFs and donor_qc.txt, flat with the legacy names
-    qc_pdfs                   { path '.' }
-    qc_donor_qc               { path '.' }
+    // the optional QC step (run_qc): the PDFs and donor_qc.txt, with the legacy names, in qc_plots/
+    qc_pdfs                   { path 'qc_plots' }
+    qc_donor_qc               { path 'qc_plots' }
     donor_metacells           { path '.' }
     donor_cell_type_metacells { path '.' }
     // pipeline_info/

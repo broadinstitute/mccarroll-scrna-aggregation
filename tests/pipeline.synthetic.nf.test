@@ -340,7 +340,7 @@ nextflow_pipeline {
             assertAll(
                 { assert workflow.success },
                 { assert workflow.trace.tasks().size() > 0 && workflow.trace.tasks().every { !it.name.contains('AGGREGATION_QC') } },
-                { assert published.findAll { it.endsWith('.pdf') || it.endsWith('.donor_qc.txt') } == [] },
+                { assert !published.contains('qc_plots') },
                 // the other results are there
                 { assert published.contains('SYN.cell_metadata.txt') }
             )
@@ -362,14 +362,17 @@ nextflow_pipeline {
         then {
             def out = new File("${params.outdir}".toString())
             def published = workflow.success ? out.list().toList() : []
+            def qcPublished = workflow.success ? new File(out, 'qc_plots').list().toList() : []
             assertAll(
                 { assert workflow.success },
                 { assert workflow.trace.tasks().count { it.name.contains('AGGREGATION_QC') } == 1 },
+                // the QC files are in qc_plots/ and nowhere else
+                { assert published.findAll { it.endsWith('.pdf') || it.endsWith('.donor_qc.txt') } == [] },
                 // the library PDFs, and the overall cell type PDFs (the libraries have MapMyCells results); no donor file, so no donor outputs
-                { assert published.findAll { it.endsWith('.pdf') }.sort() == [
+                { assert qcPublished.findAll { it.endsWith('.pdf') }.sort() == [
                     'SYN.cell_type_counts.pdf', 'SYN.cell_type_median_UMIs.pdf', 'SYN.cell_type_proportions.pdf',
                     'SYN.filtered_library_metrics.pdf', 'SYN.library_metrics.pdf' ] },
-                { assert !published.contains('SYN.donor_qc.txt') },
+                { assert !qcPublished.contains('SYN.donor_qc.txt') },
                 { assert published.contains('SYN.cell_metadata.txt') }
             )
         }
