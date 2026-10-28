@@ -180,8 +180,9 @@ py cat_tsvs --output "$PREFIX.library_metrics.txt" "${METRICS_FILES[@]}"
 
 # ---------------------------------------------------------------------------------------------------------------
 # 3. Cell metadata of each library: cmd.tsv, with PREFIX as the first column, and the MapMyCells results joined
-#    on to the end if there are any (replaces the scPred join_and_filter_tsv step).  A donor in the manifest
-#    overrides the donor column of cmd.tsv, which already has the donors of a village or a single donor library.
+#    on to the end if there are any (replaces the scPred join_and_filter_tsv step).  A donor in the manifest is added
+#    with --set donor, which never replaces data: for a village, whose cmd.tsv already has the donor of each cell, the
+#    tool stops with "the input file already has a column named donor".
 # ---------------------------------------------------------------------------------------------------------------
 LOCAL_DGES=() LIBRARY_METADATA_FILES=()
 CELL_TYPE_COLUMN=

@@ -10,9 +10,8 @@ Only what is still to be done. Done work is in `DONE.md`; design decisions, gotc
 
 ## Next
 1. After the merge of pull request 6, move the git tag `prod` (it is on `d76e217`, the merge of PR #4) so Seqera runs pick up the h5ad and QC steps. Do it before turning `run_qc` on in a real run.
-2. Decide, before the first release, whether the QC PDFs are published in a subdirectory such as `qc/` (now flat, with the legacy names).
+2. Publish the QC PDFs and `donor_qc.txt` in a `qc/` subdirectory (decided; now flat, with the legacy names). Update the outputs, the live test, `tests/google_cloud_batch_run/run.sh`, the baseline and the docs.
 3. Delete the scratch data of the Google Batch checks: `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing/{work,out}`, `gs://mccarroll_scrnaseq_central_temp/nextflow/pipeline-testing/nf-test-batch-work/` and `gs://bican-um1-mccarroll_temp/nextflow/batch-access-check-work/`.
-4. Follow-up in the Drop-seq repository: `resolve_aggregation_manifest.py` and the Zamboni workflow still accept a manifest `donor` for a village (this pipeline's resolver rejects it).
 
 ## Needs more data
 - **Tune memory** of the three Java steps (`MAKE_TRIPLET_DGE`, `DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`: now 15 GB, then 30 GB; the single live library peaked at 514 MB) and the default 6 GB of the other steps, with multi-library data sets on Google Batch. Keep the machine types in the `googlebatch` profile (`nextflow.config`) in step with the requests.
