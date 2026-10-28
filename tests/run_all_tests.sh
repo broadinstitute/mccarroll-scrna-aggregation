@@ -3,7 +3,7 @@
 # The live tests compare with the baseline made by the prototype shell script, which is run separately first:
 #   docs/specifications/scrna-aggregation_prototype.sh --manifest tests/live_data/manifest.yaml \
 #       --analysis-id SMRI_V11.unfiltered --out-dir tests/live_data/baseline --image-tag current
-# See docs/testing.md. Needs GOOGLE_PROJECT_ID in the environment, for example: export GOOGLE_PROJECT_ID=bican-um1-mccarroll
+# See docs/testing.md. Needs GOOGLE_PROJECT_ID in the environment, for example: export GOOGLE_PROJECT_ID=mccarroll-scrna-seq
 # To run one file or one test, see "How to run the tests" in docs/testing.md.
 set -euo pipefail
 
@@ -11,7 +11,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO"
 
 # fail before starting docker, with a clear message
-[[ -n ${GOOGLE_PROJECT_ID:-} ]] || { echo "ERROR: export GOOGLE_PROJECT_ID first, for example: export GOOGLE_PROJECT_ID=bican-um1-mccarroll" >&2; exit 1; }
+[[ -n ${GOOGLE_PROJECT_ID:-} ]] || { echo "ERROR: export GOOGLE_PROJECT_ID first, for example: export GOOGLE_PROJECT_ID=mccarroll-scrna-seq" >&2; exit 1; }
 ADC=${HOME}/.config/gcloud/application_default_credentials.json
 [[ -f $ADC ]] || { echo "ERROR: credentials not found: $ADC (run: gcloud auth application-default login)" >&2; exit 1; }
 command -v nf-test >/dev/null || { echo "ERROR: nf-test not found on PATH" >&2; exit 1; }

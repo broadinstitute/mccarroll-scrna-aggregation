@@ -36,6 +36,10 @@ params {
     analysis_id: String?            // label of this aggregation: prefix of the merged output files
     mmc_model: String?              // MapMyCells model to use instead of the first model of each library
     mmc_level: String?              // MapMyCells taxonomy level for the cell type column
+    run_qc: Boolean                 // run the optional aggregation QC step
+    qc_conditions_file: String?     // QC: TSV (library, condition), local path or gs://
+    qc_condition_column: String?    // QC: cell metadata column holding the condition of each library
+    qc_core_cell_types: String?     // QC: file with one core cell type per line
     outdir: String?                 // directory where the results are published
     gcp_credentials_file: String?   // GCP credentials JSON mounted into task containers (docker profile)
 
@@ -72,6 +76,10 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     manifest: Value<Manifest>   // one item: record(id: analysis id, manifest: path)
     entries: Value<List<Map>>   // one item: the list of manifest entries, in manifest order
     mmc_model: String?          // params.mmc_model, the MapMyCells model that replaces each library's first model
+    run_qc: Boolean             // params.run_qc, run the optional QC step
+    qc_conditions_file: String? // params.qc_conditions_file
+    qc_condition_column: String? // params.qc_condition_column
+    qc_core_cell_types: String? // params.qc_core_cell_types
 
     main:
 
@@ -81,7 +89,11 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     results = SCRNA_AGGREGATION (
         manifest,
         entries,
-        mmc_model
+        mmc_model,
+        run_qc,
+        qc_conditions_file,
+        qc_condition_column,
+        qc_core_cell_types
     )
 
     // The published files, one channel of paths each (see the output block below).
@@ -95,6 +107,8 @@ workflow MCCARROLL_SCRNA_AGGREGATION {
     barcodes: Value<Path> = results.barcodes
     features: Value<Path> = results.features
     donor_cell_type_report: Channel<Path> = results.donor_cell_type_report
+    qc_pdfs: Channel<Path> = results.qc_pdfs
+    qc_donor_qc: Channel<Path> = results.qc_donor_qc
     donor_metacells: Channel<Path> = results.donor_metacells
     donor_cell_type_metacells: Channel<Path> = results.donor_cell_type_metacells
     resolved_summary: Value<Path> = results.resolved_summary
@@ -132,7 +146,11 @@ workflow {
     results = MCCARROLL_SCRNA_AGGREGATION (
         init.manifest,
         init.entries,
-        params.mmc_model
+        params.mmc_model,
+        params.run_qc,
+        params.qc_conditions_file,
+        params.qc_condition_column,
+        params.qc_core_cell_types
     )
     //
     // SUBWORKFLOW: Run completion tasks
@@ -153,6 +171,8 @@ workflow {
     barcodes = results.barcodes
     features = results.features
     donor_cell_type_report = results.donor_cell_type_report
+    qc_pdfs = results.qc_pdfs
+    qc_donor_qc = results.qc_donor_qc
     donor_metacells = results.donor_metacells
     donor_cell_type_metacells = results.donor_cell_type_metacells
     resolved_summary = results.resolved_summary
@@ -178,6 +198,9 @@ output {
     barcodes                  { path '.' }
     features                  { path '.' }
     donor_cell_type_report    { path '.' }
+    // the optional QC step (run_qc): the PDFs and donor_qc.txt, with the legacy names, in qc_plots/
+    qc_pdfs                   { path 'qc_plots' }
+    qc_donor_qc               { path 'qc_plots' }
     donor_metacells           { path '.' }
     donor_cell_type_metacells { path '.' }
     // pipeline_info/

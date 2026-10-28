@@ -43,7 +43,7 @@ class LibraryResolver {
      * @param analysisId no library id may be the same
      * @param options [mmcModel:
      *   MapMyCells model to use instead of the first model of each library]; either may be null or absent
-     * @return [analysisId; hasDonors (all libraries have donors; a mix is an error); libraries: Map of library id to record, in manifest order; reducedGtf; reference].  A record is
+     * @return [analysisId; hasDonors (all libraries have donors; a mix is an error); donorFiles (the distinct donor_file paths of the artifacts in manifest order, so libraries of one village give one entry; empty if any library has none; compared by content later, by the QC tool); libraries: Map of library id to record, in manifest order; reducedGtf; reference].  A record is
      *   [libraryId, position (0-based, in manifest order), hasDonor, dge, cellMetadata, mmcModel, mmcAnnotations, args, files]: the DGE is the one the manifest names; the arguments
      *   and files are those of JoinFilterArguments.build.  mmcAnnotations is the csv of the model, or NA, and gates the MapMyCells conversion.
      */
@@ -64,6 +64,7 @@ class LibraryResolver {
         Map<String, Map> libraries = new LinkedHashMap<>()
         Map<String, List<String>> idsByReference = [:]
         List<String> libraryIds = []
+        List<String> donorOnVillage = []
         entries.each { Map entry ->
             Map dataset = datasetByDge[entry.dge]
             if (dataset == null) {
@@ -93,13 +94,23 @@ class LibraryResolver {
             // A library has donors if the manifest names its donor (a library that is not a village) or its artifacts have a village stage
             // (donor assignment, whose cell metadata holds the donor of each cell). Known here, so nothing needs to look in the files later.
             boolean hasDonor = entry.donor != null || value(dataset.village_properties) != NA
+            // The cell metadata of a village has the donor of each cell. That is trusted data: a donor in the manifest must not replace it
+            // (join_and_filter_tsv refuses to --set a column that its input has), so it is rejected here, before any process runs.
+            if (entry.donor != null && value(dataset.village_properties) != NA) {
+                donorOnVillage << "${id} (DGE ${entry.dge})".toString()
+            }
 
             Map built = JoinFilterArguments.build(entry)
             checkStagedNames(id, cellMetadata, built.files)
             libraries[id] = [libraryId: id, position: libraries.size(), hasDonor: hasDonor, dge: dge, cellMetadata: cellMetadata, mmcModel: model, mmcAnnotations: annotations,
-                             args: built.args, files: built.files, reducedGtf: value(dataset.reduced_gtf)]
+                             args: built.args, files: built.files, reducedGtf: value(dataset.reduced_gtf), donorFile: value(dataset.donor_file)]
         }
 
+        if (donorOnVillage) {
+            throw new IllegalArgumentException(
+                "A donor in the manifest cannot be given to a library that is a village: its cell metadata already has the donor of each cell, " +
+                "and the manifest does not replace it.  Remove donor from the manifest entries of: ${donorOnVillage.join(', ')}.")
+        }
         if (libraryIds.toSet().size() != libraryIds.size()) {
             throw new IllegalArgumentException("Library IDs must be unique, found ${libraryIds}")
         }
@@ -138,8 +149,30 @@ class LibraryResolver {
                 "Without: ${withoutDonors}.")
         }
 
-        libraries.values().each { it.remove('reducedGtf') }
-        return [analysisId: analysisId, hasDonors: !withDonors.isEmpty(), libraries: libraries, reducedGtf: gtfs.first(), reference: reference]
+        // The expected donors of the QC: the donor files of the libraries, none at all if any library has none (a partial list would give a wrong set of donors).
+        // Different paths may have one base name: the QC process stages each file under a unique name and the tool compares the contents.
+        List<String> donorFiles = libraries.values()*.donorFile.every { it != NA } ? libraries.values()*.donorFile.unique() : []
+
+        libraries.values().each { it.remove('reducedGtf'); it.remove('donorFile') }
+        return [analysisId: analysisId, hasDonors: !withDonors.isEmpty(), donorFiles: donorFiles, libraries: libraries, reducedGtf: gtfs.first(), reference: reference]
+    }
+
+    /**
+     * Resolves the donor files of the libraries (resolve's donorFiles) to the one file the QC needs: the first, if every file has the same set of
+     * donors (compared by content: one donor per line, order, blank lines, a final newline and CRLF line endings do not matter), else null (no donor QC).
+     * Reads the files, so call it only when the QC runs.
+     * @param paths the donor file paths, in manifest order
+     * @param read a closure returning the text of a path (a local or gs:// file)
+     * @return the first path, or null if there are none or the sets of donors differ
+     */
+    static String commonDonorFile(List<String> paths, Closure<String> read) {
+        if (paths.isEmpty()) {
+            return null
+        }
+        List<Set<String>> sets = paths.collect { String path ->
+            read(path).readLines().collect { it.trim() }.findAll { !it.isEmpty() }.toSet()
+        }
+        return sets.every { it == sets.first() } ? paths.first() : null
     }
 
     /** @return the name of the arguments file of a library */

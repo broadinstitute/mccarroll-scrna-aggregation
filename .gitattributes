@@ -2,3 +2,5 @@
 *.nf.test linguist-language=nextflow
 modules/nf-core/** linguist-generated
 subworkflows/nf-core/** linguist-generated
+# the CRLF line endings of this fixture are what its test checks
+modules/local/aggregation_qc/tests/fixtures/donors_other_name.txt -text

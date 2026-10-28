@@ -1,0 +1,5 @@
+# a village (the donor of each cell is in its cell metadata) with a donor-level join: age and sex of each donor, joined on the donor column; N3 is not in the file
+dges:
+  - dge: @ROOT@/LIB_VILLAGE/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_VILLAGE.donors.digital_expression.txt.gz
+    joins:
+      - {joinFile: @ROOT@/files/donor_attributes.tsv, leftColumn: donor, joinColumn: donor}

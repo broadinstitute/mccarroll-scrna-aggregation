@@ -1,0 +1,126 @@
+nextflow_function {
+
+    name "Test pre-flight check of the QC parameters"
+    script "subworkflows/local/utils_nfcore_scrna-aggregation_pipeline/main.nf"
+    function "checkQcParams"
+    tag 'subworkflows'
+    tag 'utils_nfcore_scrna-aggregation_pipeline'
+    tag 'preflight'
+    tag 'qc'
+
+    // Contract: checkQcParams(Boolean runQc, String conditionsFile, String conditionColumn, String coreCellTypes) -> List<String>
+    //   - calls error() when both a conditions file and a condition column are given (they are exclusive), whether or not run_qc is true
+    //   - returns one warning for each of the three QC parameters given while run_qc is false (they are ignored); [] otherwise
+    // The warning about core cell types without MapMyCells results needs the libraries, so it is made in the workflow (pipeline.synthetic.nf.test).
+
+    test("Should fail, naming both parameters, when a conditions file and a condition column are both given") {
+
+        when {
+            function {
+                """
+                input[0] = true
+                input[1] = 'conditions.tsv'
+                input[2] = 'sort'
+                input[3] = null
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_conditions_file') },
+                { assert output.contains('qc_condition_column') }
+            )
+        }
+    }
+
+    test("Should fail on both condition parameters even without run_qc") {
+
+        when {
+            function {
+                """
+                input[0] = false
+                input[1] = 'conditions.tsv'
+                input[2] = 'sort'
+                input[3] = null
+                """
+            }
+        }
+
+        then {
+            def output = (function.stdout + function.stderr).join('\\n')
+            assertAll(
+                { assert function.failed },
+                { assert output.contains('qc_conditions_file') && output.contains('qc_condition_column') }
+            )
+        }
+    }
+
+    test("Should warn once for each QC parameter that is given without run_qc, since it is ignored") {
+
+        when {
+            function {
+                """
+                input[0] = false
+                input[1] = 'conditions.tsv'
+                input[2] = null
+                input[3] = 'core.txt'
+                """
+            }
+        }
+
+        then {
+            def warnings = function.result
+            assertAll(
+                { assert function.success },
+                { assert warnings.size() == 2 },
+                { assert warnings.any { it.contains('qc_conditions_file') && it.contains('run_qc') } },
+                { assert warnings.any { it.contains('qc_core_cell_types') && it.contains('run_qc') } }
+            )
+        }
+    }
+
+    test("Should give no warning when no QC parameter is given, or when run_qc is true") {
+
+        when {
+            function {
+                """
+                input[0] = false
+                input[1] = null
+                input[2] = null
+                input[3] = null
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success },
+                { assert function.result == [] }
+            )
+        }
+    }
+
+    test("Should give no warning when run_qc is true, with any one of the optional parameters") {
+
+        when {
+            function {
+                """
+                input[0] = true
+                input[1] = null
+                input[2] = 'sort'
+                input[3] = 'core.txt'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert function.success },
+                { assert function.result == [] }
+            )
+        }
+    }
+}

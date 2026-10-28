@@ -15,6 +15,6 @@ Tiny inputs for the BUILD_LIBRARY_H5AD tests (self-contained; not shared with ot
   LIB_A_AAAA, LIB_A_TTTT.
 - reduced.gtf: GENEA (a gene row and an exon row, so that a gene is not counted twice), GENEB, GENEC and GENED (not in the DGE, so it is not
   in the file). Gene IDs ENSG01 to ENSG04 for GENEA to GENED.
-- The tests use no extra argument, except those that name uppercase.config (--uppercase-column cell_barcode, the pipeline's default).
+- The tests run with uppercase.config (--uppercase-column cell_barcode, the pipeline's default): one test checks the whole output file, two tests use the inputs below that must fail.
 - cell_metadata_cell_not_in_dge.tsv: GGGG and ACGT (not in the DGE): the module must fail.
 - reduced_missing_geneC.gtf: reduced.gtf without GENEC (the module must fail).

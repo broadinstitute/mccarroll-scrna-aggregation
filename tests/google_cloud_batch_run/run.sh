@@ -3,12 +3,13 @@
 # then checks the result. Not an nf-test: nf-test always passes a local -work-dir and Google Batch needs a gs:// one. It costs a little money.
 #
 #   export GOOGLE_PROJECT_ID=mccarroll-scrna-seq GOOGLE_LOCATION=us-central1
-#   tests/batch_full_run/run.sh [gs://<bucket>/<path>]    # default: gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing
+#   tests/google_cloud_batch_run/run.sh [gs://<bucket>/<path>]    # default: gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing
 #
 # Needs: nextflow, gcloud Application Default Credentials, gsutil, the baseline in tests/live_data/baseline (docs/testing.md).
-# Writes <base>/work and <base>/out (the base is removed first for out/), downloads out/ to testing_batch_full_run/out (git-ignored).
+# Writes <base>/work and <base>/out (the base is removed first for out/), downloads out/ to testing_google_cloud_batch_run/out (git-ignored).
 # Checks (each prints PASS or FAIL; the exit status is the number of failures):
 #   1. the published files equal the baseline (md5 of the decompressed content; the metacell header line is ignored)
+#   1c. the QC step (--run_qc true): donor_qc.txt equals the baseline's (so the head job read the gs:// donor file) and the 8 PDFs exist, are not empty and start with %PDF
 #   2. the top level of --outdir lists exactly the expected entries
 #   3. exec processes (WRITE_*) ran in the head job, every other task on google-batch (Google Batch)
 #   4. every task COMPLETED, and the tasks ran in the public quay.io/broadinstitute drop-seq images
@@ -20,7 +21,7 @@ cd "$REPO"
 BASE=${1:-gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing}
 BASE=${BASE%/}
 ANALYSIS=SMRI_V11.unfiltered
-RUN=testing_batch_full_run
+RUN=testing_google_cloud_batch_run
 BASELINE=tests/live_data/baseline
 
 [[ -n ${GOOGLE_PROJECT_ID:-} && -n ${GOOGLE_LOCATION:-} ]] || { echo "ERROR: export GOOGLE_PROJECT_ID and GOOGLE_LOCATION first (see the header of this script)" >&2; exit 2; }
@@ -35,9 +36,9 @@ echo "== nextflow run on Google Batch: project $GOOGLE_PROJECT_ID, $GOOGLE_LOCAT
 # </dev/null: Nextflow reads the terminal, and a background job that does so is suspended by the shell (state T) and never runs.
 # -ansi-log true: Nextflow's colored output and progress display. Without a terminal on stdin (see above) Nextflow would otherwise
 # switch to plain text.
-nextflow run . -ansi-log true -profile googlebatch -c tests/batch_full_run/trace.config \
+nextflow run . -ansi-log true -profile googlebatch -c tests/google_cloud_batch_run/trace.config \
   -work-dir "$BASE/work" --outdir "$BASE/out" \
-  --manifest tests/live_data/manifest.yaml --analysis_id "$ANALYSIS" < /dev/null 2>&1 | tee "$RUN/nextflow.log"
+  --manifest tests/live_data/manifest.yaml --analysis_id "$ANALYSIS" --run_qc true < /dev/null 2>&1 | tee "$RUN/nextflow.log"
 [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "FAIL: the pipeline run failed (see $RUN/nextflow.log)"; exit 1; }
 
 echo "== downloading $BASE/out"
@@ -67,11 +68,26 @@ for f in "$BASELINE"/h5ad/*.h5ad; do
   check $? "h5ad/$(basename "$f") equals the baseline"
 done
 
+# 1c. the QC step: donor_qc.txt equals the baseline's (it exists only if the head job read the gs:// donor file); the PDFs cannot be diffed
+qc_pdfs=()
+for n in library_metrics filtered_library_metrics donor_summary donor_nuclei_counts cell_type_counts cell_type_median_UMIs cell_type_proportions donor_cell_type_distributions; do
+  qc_pdfs+=("$ANALYSIS.$n.pdf")
+done
+[[ -f $RUN/out/qc_plots/$ANALYSIS.donor_qc.txt && -f $BASELINE/qc_plots/$ANALYSIS.donor_qc.txt && $(content_md5 "$RUN/out/qc_plots/$ANALYSIS.donor_qc.txt") == "$(content_md5 "$BASELINE/qc_plots/$ANALYSIS.donor_qc.txt")" ]]
+check $? "qc_plots/$ANALYSIS.donor_qc.txt equals the baseline"
+for f in "${qc_pdfs[@]}"; do
+  [[ -s $RUN/out/qc_plots/$f && $(head -c 4 "$RUN/out/qc_plots/$f") == "%PDF" ]]
+  check $? "qc_plots/$f exists, is not empty and starts with %PDF"
+done
+expected_qc=$(printf '%s\n' "$ANALYSIS.donor_qc.txt" "${qc_pdfs[@]}" | sort)
+[[ $expected_qc == "$(ls "$RUN/out/qc_plots" | sort)" ]]
+check $? "qc_plots/ is exactly donor_qc.txt and the 8 PDFs"
+
 # 2. exact top-level listing
-expected=$(printf '%s\n' "${merged[@]}" artifacts tearsheets h5ad pipeline_info | sort)
+expected=$(printf '%s\n' "${merged[@]}" qc_plots artifacts tearsheets h5ad pipeline_info | sort)
 actual=$(ls "$RUN/out" | sort)
 [[ $expected == "$actual" ]]
-check $? "the top level of --outdir is exactly the merged files, artifacts/, tearsheets/, h5ad/ and pipeline_info/"
+check $? "the top level of --outdir is exactly the merged files, qc_plots/, artifacts/, tearsheets/, h5ad/ and pipeline_info/"
 [[ $expected == "$actual" ]] || diff <(echo "$expected") <(echo "$actual")
 
 # 3 and 4. the trace (tab separated, columns found by name). The trace has no executor field: a task submitted to Google Batch has a job id in

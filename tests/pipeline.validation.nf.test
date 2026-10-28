@@ -134,4 +134,24 @@ nextflow_pipeline {
             )
         }
     }
+
+    test("Should fail before any process when run_qc is true and a QC file does not exist") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                run_qc = true
+                qc_conditions_file = "$outputDir/missing_conditions.tsv"
+            }
+        }
+
+        then {
+            def output = (workflow.stdout + workflow.stderr).join('\n')
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains('qc_conditions_file') && output.contains('missing_conditions.tsv') },
+                { assert workflow.trace.tasks().size() == 0 }
+            )
+        }
+    }
 }

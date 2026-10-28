@@ -42,6 +42,7 @@ datasets:
       mmc_json: NA
       mmc_cell_type_counts: NA
   village_properties: /fixtures/LIB_A/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/properties.yaml
+  donor_file: /fixtures/donors/LIB_A.donors.txt
   dge_donors: /fixtures/LIB_A/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_A.donors.digital_expression.txt.gz
   dge_summary_donors: /fixtures/LIB_A/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_A.donors.digital_expression_summary.txt
   dropulation_summary_stats: NA

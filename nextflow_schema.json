@@ -60,6 +60,39 @@
                 }
             }
         },
+        "qc_options": {
+            "title": "QC options",
+            "type": "object",
+            "fa_icon": "fas fa-chart-bar",
+            "description": "The optional aggregation QC step: PDFs of library, donor and cell type QC and donor_qc.txt, published in the qc_plots directory of the output directory.",
+            "properties": {
+                "run_qc": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Run the aggregation QC step.",
+                    "help_text": "Off by default. The expected donors are the donor file of the libraries' villages (all libraries must have the same donors, else there are no donor outputs).",
+                    "fa_icon": "fas fa-check-double"
+                },
+                "qc_conditions_file": {
+                    "type": "string",
+                    "description": "TSV with a header and two columns (library, condition) for the QC, a local path or gs:// URL. Every library must be in it.",
+                    "help_text": "The column names are not checked. Ignored unless run_qc is true; not with qc_condition_column.",
+                    "fa_icon": "fas fa-file-csv"
+                },
+                "qc_condition_column": {
+                    "type": "string",
+                    "description": "Name of a cell metadata column (for example one added by a manifest join) with one value per library, used as the condition in the QC.",
+                    "help_text": "Ignored unless run_qc is true; not with qc_conditions_file.",
+                    "fa_icon": "fas fa-columns"
+                },
+                "qc_core_cell_types": {
+                    "type": "string",
+                    "description": "File with one core cell type per line (no header), a local path or gs:// URL.",
+                    "help_text": "Core cell types are a few types that are consistently present in the tissue, whatever the dissection, so the per-donor median UMIs of each is comparable between donors. The labels must belong to the chosen MapMyCells model and level. Ignored unless run_qc is true.",
+                    "fa_icon": "fas fa-dna"
+                }
+            }
+        },
         "institutional_config_options": {
             "title": "Institutional config options",
             "type": "object",
@@ -169,6 +202,9 @@
     "allOf": [
         {
             "$ref": "#/$defs/input_output_options"
+        },
+        {
+            "$ref": "#/$defs/qc_options"
         },
         {
             "$ref": "#/$defs/institutional_config_options"

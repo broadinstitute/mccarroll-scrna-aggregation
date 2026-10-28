@@ -52,12 +52,30 @@ Usage: $0 --manifest dges.yaml --analysis-id ID --out-dir DIR [--image-tag TAG] 
   --mmc-level LEVEL     MapMyCells taxonomy level for the cell type.  Default: the top level of the taxonomy.
   --reference NAME      Reference name.  Skips the check that all libraries have the same reference.
   --java-memory MEM     Memory for the Java tools.  Default: 8g
+
+Optional QC step, a donor QC table and PDFs of library, donor and cell type QC (aggregation_qc --help):
+  --run-qc              Run it, at the end.  The options below are ignored without it.
+  --qc-conditions-file FILE
+                        Tab-separated file with a header and two columns, library and condition.  Every library
+                        needs a condition.  Not with --qc-condition-column.
+  --qc-condition-column COLUMN
+                        Column of the cell metadata with the condition of the library (one value per library).
+  --qc-core-cell-types FILE
+                        Headerless file with the core cell types, one per line: the cell types that are consistently
+                        present in the tissue, whatever the dissection, for a per-donor median UMI comparable between
+                        donors.  The labels belong to the cell type column (MapMyCells model and level) of the run.
 USAGE
   exit 1
 }
 
 MANIFEST= ANALYSIS_ID= OUT_DIR= TMP_DIR= IMAGE_TAG=current MMC_MODEL= MMC_LEVEL= REFERENCE= JAVA_MEMORY=8g
+RUN_QC= QC_CONDITIONS_FILE= QC_CONDITION_COLUMN= QC_CORE_CELL_TYPES=
 while [[ $# -gt 0 ]]; do
+  if [[ $1 == --run-qc ]]; then
+    RUN_QC=1
+    shift
+    continue
+  fi
   [[ $# -ge 2 ]] || usage
   case "$1" in
     --manifest) MANIFEST=$2 ;;
@@ -69,11 +87,21 @@ while [[ $# -gt 0 ]]; do
     --mmc-level) MMC_LEVEL=$2 ;;
     --reference) REFERENCE=$2 ;;
     --java-memory) JAVA_MEMORY=$2 ;;
+    --qc-conditions-file) QC_CONDITIONS_FILE=$2 ;;
+    --qc-condition-column) QC_CONDITION_COLUMN=$2 ;;
+    --qc-core-cell-types) QC_CORE_CELL_TYPES=$2 ;;
     *) usage ;;
   esac
   shift 2
 done
 [[ -n $MANIFEST && -n $ANALYSIS_ID && -n $OUT_DIR ]] || usage
+if [[ -n $QC_CONDITIONS_FILE && -n $QC_CONDITION_COLUMN ]]; then
+  echo "ERROR: --qc-conditions-file and --qc-condition-column cannot be used together" >&2
+  exit 1
+fi
+if [[ -z $RUN_QC && -n $QC_CONDITIONS_FILE$QC_CONDITION_COLUMN$QC_CORE_CELL_TYPES ]]; then
+  echo "WARNING: the --qc-* options are ignored without --run-qc" >&2
+fi
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
 # Run a command, echoing it first so that the log reads like the Zamboni workflow.log.
@@ -152,8 +180,9 @@ py cat_tsvs --output "$PREFIX.library_metrics.txt" "${METRICS_FILES[@]}"
 
 # ---------------------------------------------------------------------------------------------------------------
 # 3. Cell metadata of each library: cmd.tsv, with PREFIX as the first column, and the MapMyCells results joined
-#    on to the end if there are any (replaces the scPred join_and_filter_tsv step).  A donor in the manifest
-#    overrides the donor column of cmd.tsv, which already has the donors of a village or a single donor library.
+#    on to the end if there are any (replaces the scPred join_and_filter_tsv step).  A donor in the manifest is added
+#    with --set donor, which never replaces data: for a village, whose cmd.tsv already has the donor of each cell, the
+#    tool stops with "the input file already has a column named donor".
 # ---------------------------------------------------------------------------------------------------------------
 LOCAL_DGES=() LIBRARY_METADATA_FILES=()
 CELL_TYPE_COLUMN=
@@ -267,6 +296,45 @@ else
   else
     log "WARNING: no MapMyCells results, so no donor by cell type metacells"
   fi
+fi
+
+# ---------------------------------------------------------------------------------------------------------------
+# 10. Optional QC: <analysis>.donor_qc.txt and PDFs of library, donor and cell type QC, written to OUT_DIR/qc_plots.
+#     The expected donors are the donor_file of each library's artifact YAML (the donorFile of its village), which
+#     is passed only if every library has one: aggregation_qc skips the donor outputs without it, or if the libraries'
+#     donor files differ.  Files given on the command line are copied to TMP_DIR, which the container can read.
+# ---------------------------------------------------------------------------------------------------------------
+if [[ -n $RUN_QC ]]; then
+  qc_dir=$TMP_DIR/qc
+  mkdir -p "$qc_dir" "$OUT_DIR/qc_plots"
+  qc_args=()
+  donor_files=() all_have_donor_file=1
+  for i in "${!LIBRARIES[@]}"; do
+    donor_file=$(sed -n 's/^  donor_file: //p' "${ARTIFACT_FILES[$i]}")
+    if [[ -z $donor_file || $donor_file == NA ]]; then
+      all_have_donor_file=
+    else
+      fetch "$donor_file" "$qc_dir/${LIBRARIES[$i]}.donors.txt"
+      donor_files+=("$qc_dir/${LIBRARIES[$i]}.donors.txt")
+    fi
+  done
+  if [[ -n $all_have_donor_file ]]; then
+    qc_args+=(--donor-file "${donor_files[@]}")
+  else
+    log "WARNING: not every library has a donor file, so there will be no donor QC"
+  fi
+  [[ -z $CELL_TYPE_COLUMN ]] || qc_args+=(--cell-type-column "$CELL_TYPE_COLUMN")
+  if [[ -n $QC_CONDITIONS_FILE ]]; then
+    fetch "$QC_CONDITIONS_FILE" "$qc_dir/conditions.txt"
+    qc_args+=(--conditions-file "$qc_dir/conditions.txt")
+  fi
+  [[ -z $QC_CONDITION_COLUMN ]] || qc_args+=(--condition-column "$QC_CONDITION_COLUMN")
+  if [[ -n $QC_CORE_CELL_TYPES ]]; then
+    fetch "$QC_CORE_CELL_TYPES" "$qc_dir/core_cell_types.txt"
+    qc_args+=(--core-cell-types "$qc_dir/core_cell_types.txt")
+  fi
+  py aggregation_qc --cell-metadata "$CELL_METADATA" --library-metrics "$PREFIX.library_metrics.txt" \
+    --analysis-id "$ANALYSIS_ID" --output-dir "$OUT_DIR/qc_plots" "${qc_args[@]}"
 fi
 
 log "Done: $OUT_DIR"

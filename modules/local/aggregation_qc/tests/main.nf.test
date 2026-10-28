@@ -1,0 +1,127 @@
+nextflow_process {
+
+    name "Test Process AGGREGATION_QC"
+    script "modules/local/aggregation_qc/main.nf"
+    process "AGGREGATION_QC"
+    config "./nextflow.config"
+    tag "modules"
+    tag "modules_local"
+    tag "aggregation_qc"
+
+    // Contract: record(id, cell_metadata: Path, library_metrics: Path, donor_file: Path?, cell_type_column: String?, conditions_file: Path?,
+    //   condition_column: String?, core_cell_types: Path?)
+    //   -> qc: record(id, pdfs: List<Path> '<id>.*.pdf', donor_qc: Path? '<id>.donor_qc.txt').
+    // Gates are decided by the tool: library PDFs always; donor_qc.txt and the donor PDFs need a donor file; the cell type PDFs need a cell type column.
+    // A skipped output is not an error (exit 0). Invalid input fails the task.
+    // Fixtures: tests/fixtures/README.md (the expected donor_qc values are worked out there). The live comparison with the baseline is in live.nf.test.
+
+    def libraryPdfs = ['library_metrics', 'filtered_library_metrics']
+    def donorPdfs = ['donor_summary', 'donor_nuclei_counts']
+    def cellTypePdfs = ['cell_type_counts', 'cell_type_median_UMIs', 'cell_type_proportions']
+    def bothPdfs = ['donor_cell_type_distributions']
+    // The input record; each optional part is a fixture file name (null for none). The text is built here, so nf-test does not substitute ${moduleDir}
+    // in it: the fixture paths are made from the repository root (the directory nf-test runs in).
+    def fixtures = "${System.getProperty('user.dir')}/modules/local/aggregation_qc/tests/fixtures"
+    def input = { Map o = [:] ->
+        def f = { String name -> name ? "file('${fixtures}/${name}')" : 'null' }
+        def ct = o.containsKey('cellType') ? o.cellType : 'M_class_name'
+        def ctExpr = ct ? "'${ct}'" : 'null'
+        "input[0] = record(id: 'analysis1', cell_metadata: ${f('cell_metadata.tsv')}, library_metrics: ${f('library_metrics.tsv')}, " +
+            "donor_file: ${f(o.donors)}, cell_type_column: ${ctExpr}, conditions_file: ${f(o.conditions)}, condition_column: null, core_cell_types: ${f(o.core)})"
+    }
+    def names = { process -> process.out.qc[0].pdfs.collect { file(it).name }.sort() }
+    def expectedPdfs = { List stems -> stems.collect { "analysis1.${it}.pdf".toString() }.sort() }
+    // donor_qc.txt as a map donor -> [column -> value]
+    def donorQc = { process ->
+        def lines = file(process.out.qc[0].donor_qc).readLines().collect { it.split('\t', -1) as List }
+        lines.drop(1).collectEntries { row -> [(row[0]): [lines[0], row].transpose().collectEntries { h, v -> [(h): v] }] }
+    }
+    def isPdf = { f -> def b = new File(f.toString()).bytes; b.length > 4 && new String(b, 0, 4, 'ISO-8859-1') == '%PDF' }
+
+    test("Should write every PDF and a donor_qc.txt with the hand-computed values, from a donor file with another name, order and line endings (CRLF, blank line, no final newline)") {
+
+        when {
+            process {
+                // the donor file is the untidy one: three expected donors, not five (no carriage returns in the IDs, no empty donor)
+                input(donors: 'donors_other_name.txt', conditions: 'conditions.tsv', core: 'core_cell_types.txt')
+            }
+        }
+
+        then {
+            def qc = donorQc(process)
+            assertAll(
+                { assert process.success },
+                { assert process.out.qc.size() == 1 },
+                { assert process.out.qc[0].id == 'analysis1' },
+                { assert names(process) == expectedPdfs(libraryPdfs + donorPdfs + cellTypePdfs + bothPdfs) },
+                { assert process.out.qc[0].pdfs.every { isPdf(it) } },
+                { assert file(process.out.qc[0].donor_qc).name == 'analysis1.donor_qc.txt' },
+                { assert qc.keySet() == ['D1', 'D2', 'D3'] as Set },
+                // all three expected donors are found in the data
+                { assert qc.values().every { it.expected == 'True' || it.expected == 'true' } },
+                // nuclei, fraction (3 places), total UMIs in millions, median UMIs per nucleus (D2: even count, 60k and 200k -> 130000)
+                { assert qc.collectEntries { d, r -> [(d): [r.num_nuclei, r.fraction_nuclei, r.total_umis_m]] } ==
+                    [D1: ['5', '0.417', '0.72'], D2: ['4', '0.333', '0.7'], D3: ['3', '0.25', '0.36']] },
+                { assert qc.collectEntries { d, r -> [(d): r.median_umis_per_nucleus as double] } == [D1: 100000d, D2: 130000d, D3: 120000d] },
+                // core cell type Glut: its own column, and the pooled column (one core type, so the same values)
+                { assert qc.collectEntries { d, r -> [(d): r.median_umis_per_nucleus_Glut as double] } == [D1: 200000d, D2: 300000d, D3: 160000d] },
+                { assert qc.collectEntries { d, r -> [(d): r.median_umis_per_core_cell_type as double] } == [D1: 200000d, D2: 300000d, D3: 160000d] }
+            )
+        }
+    }
+
+    test("Should skip every donor output and still exit 0 when there is no donor file") {
+
+        when {
+            process {
+                input()
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // the library PDFs and the overall cell type PDFs remain; no donor PDFs, no donor by cell type PDF, no table
+                { assert names(process) == expectedPdfs(libraryPdfs + ['cell_type_counts', 'cell_type_median_UMIs', 'cell_type_proportions']) },
+                { assert process.out.qc[0].donor_qc == null },
+                { assert process.out.qc[0].id == 'analysis1' }
+            )
+        }
+    }
+
+    test("Should skip the cell type PDFs and still exit 0 when there is no cell type column") {
+
+        when {
+            process {
+                input(donors: 'donors.txt', cellType: null)
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert names(process) == expectedPdfs(libraryPdfs + donorPdfs) },
+                // the donor table does not need cell types
+                { assert donorQc(process).keySet() == ['D1', 'D2', 'D3'] as Set }
+            )
+        }
+    }
+
+    test("Should fail when the conditions file lacks a library") {
+
+        when {
+            process {
+                input(donors: 'donors.txt', conditions: 'conditions_missing_library.tsv')
+            }
+        }
+
+        then {
+            // error text may land on stdout or stderr depending on the environment
+            def output = (process.stdout + process.stderr).join('\n')
+            assertAll(
+                { assert process.failed },
+                { assert output.contains('LIB_B') }
+            )
+        }
+    }
+}

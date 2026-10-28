@@ -37,6 +37,7 @@ datasets:
   selected_cell_metadata: /fixtures/LIB_B/REF/cbrb/lr1/cell_selection/auto/standard_analysis/LIB_B.cmd.tsv
   mmc: NA
   village_properties: NA
+  donor_file: NA
   dge_donors: NA
   dge_summary_donors: NA
   dropulation_summary_stats: NA
