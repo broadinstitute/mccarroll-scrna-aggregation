@@ -75,7 +75,8 @@ nextflow_function {
         then {
             def a = artifact('LIB_A')
             // LIB_B is named by its selected-cells DGE although it also has a donor DGE: the DGE of the library is the one the manifest names
-            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz'])
+            // (not a village: its donor comes from the manifest, which a village's cell metadata would not allow)
+            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', village_properties: 'NA'])
             def c = artifact('LIB_C')
             def entries = AggregationManifest.parse("""
                 dges:
@@ -332,7 +333,7 @@ nextflow_function {
         then {
             def a = artifact('LIB_A')
             // LIB_B: no MapMyCells results, no extra files; named by its selected-cells DGE
-            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', mmc: 'NA'])
+            def b = artifact('LIB_B', [user_dge: '/data/LIB_B/REF/standard_analysis/LIB_B.selected.digital_expression.txt.gz', mmc: 'NA', village_properties: 'NA'])
             def entries = AggregationManifest.parse("""
                 dges:
                   - dge: ${a.datasets[0].user_dge}
@@ -431,6 +432,56 @@ nextflow_function {
                 { assert mixed != null && mixed.contains('LIB_A') && mixed.contains('LIB_B') && mixed.contains('Without') },
                 { assert mixedManifest != null && mixedManifest.contains('LIB_A') && mixedManifest.contains('LIB_B') },
                 { assert LibraryResolver.summaryText(noDonors).readLines()[3] == 'Donors:      no' }
+            )
+        }
+    }
+
+    test("Should reject a donor in the manifest for a library that is a village, naming the library and its DGE") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            // the cell metadata of a village has the donor of each cell: trusted data, which a donor in the manifest must not replace
+            def a = artifact('LIB_A')
+            def message = failure { resolve(AggregationManifest.parse("dges:\n  - dge: ${a.datasets[0].user_dge}\n    donor: N1\n"), [a]) }
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('LIB_A') && message.contains(a.datasets[0].user_dge) },
+                { assert message.contains('village') && message.contains('donor') }
+            )
+        }
+    }
+
+    test("Should list every library that has a donor in the manifest and is a village, in one message, and not a library that is not a village") {
+
+        when {
+            function {
+                """
+                input[0] = "${localManifest()}"
+                """
+            }
+        }
+
+        then {
+            def a = artifact('LIB_A'); def b = artifact('LIB_B'); def c = artifact('LIB_C', [village_properties: 'NA'])
+            def manifest = "dges:\n  - dge: ${a.datasets[0].user_dge}\n    donor: N1\n  - dge: ${b.datasets[0].user_dge}\n    donor: N2\n  - dge: ${c.datasets[0].user_dge}\n    donor: N3\n"
+            def message = failure { resolve(AggregationManifest.parse(manifest), [a, b, c]) }
+            // the same donors on libraries that are not villages resolve
+            def s1 = artifact('LIB_C', [village_properties: 'NA'])
+            def ok = resolve(AggregationManifest.parse("dges:\n  - dge: ${s1.datasets[0].user_dge}\n    donor: N3\n"), [s1])
+            assertAll(
+                { assert function.success },
+                { assert message != null },
+                { assert message.contains('LIB_A') && message.contains('LIB_B') },
+                { assert !message.contains('LIB_C') },
+                { assert ok.hasDonors }
             )
         }
     }

@@ -64,6 +64,7 @@ class LibraryResolver {
         Map<String, Map> libraries = new LinkedHashMap<>()
         Map<String, List<String>> idsByReference = [:]
         List<String> libraryIds = []
+        List<String> donorOnVillage = []
         entries.each { Map entry ->
             Map dataset = datasetByDge[entry.dge]
             if (dataset == null) {
@@ -93,6 +94,11 @@ class LibraryResolver {
             // A library has donors if the manifest names its donor (a library that is not a village) or its artifacts have a village stage
             // (donor assignment, whose cell metadata holds the donor of each cell). Known here, so nothing needs to look in the files later.
             boolean hasDonor = entry.donor != null || value(dataset.village_properties) != NA
+            // The cell metadata of a village has the donor of each cell. That is trusted data: a donor in the manifest must not replace it
+            // (join_and_filter_tsv refuses to --set a column that its input has), so it is rejected here, before any process runs.
+            if (entry.donor != null && value(dataset.village_properties) != NA) {
+                donorOnVillage << "${id} (DGE ${entry.dge})".toString()
+            }
 
             Map built = JoinFilterArguments.build(entry)
             checkStagedNames(id, cellMetadata, built.files)
@@ -100,6 +106,11 @@ class LibraryResolver {
                              args: built.args, files: built.files, reducedGtf: value(dataset.reduced_gtf), donorFile: value(dataset.donor_file)]
         }
 
+        if (donorOnVillage) {
+            throw new IllegalArgumentException(
+                "A donor in the manifest cannot be given to a library that is a village: its cell metadata already has the donor of each cell, " +
+                "and the manifest does not replace it.  Remove donor from the manifest entries of: ${donorOnVillage.join(', ')}.")
+        }
         if (libraryIds.toSet().size() != libraryIds.size()) {
             throw new IllegalArgumentException("Library IDs must be unique, found ${libraryIds}")
         }

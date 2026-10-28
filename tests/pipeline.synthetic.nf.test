@@ -395,4 +395,105 @@ nextflow_pipeline {
             )
         }
     }
+
+    // The donor-level join: a file of donor attributes (age, numeric, and sex) joined on the donor, so that every cell of a donor gets the donor's values.
+    // They need the fix of join_and_filter_tsv (Drop-seq pull request 594, in the public image tagged current). The h5ad files are not checked: each is a copy of the cell metadata of its library.
+    test("Should join donor attributes to the cells of a village on the donor, keeping every cell, with missing values for a donor that is not in the file") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_donor_join.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            assertAll(
+                { assert workflow.success },
+                // LIB_VILLAGE has four cells with the donors N1 N1 N2 N3 in its cell metadata: all four are kept, in order
+                { assert rows.collect { it.PREFIX + ':' + it.cell_barcode + ':' + it.donor } ==
+                    ['LIB_VILLAGE:AAAA:N1', 'LIB_VILLAGE:CCCC:N1', 'LIB_VILLAGE:GGGG:N2', 'LIB_VILLAGE:TTTT:N3'] },
+                // the cells of a donor have that donor's age and sex; N3 is not in the donor file, so its cell keeps its row with empty values
+                { assert rows.collect { it.age ? it.age as double : null } == [63d, 63d, 41d, null] },
+                { assert rows.collect { it.sex } == ['male', 'male', 'female', ''] },
+                { assert LiveFiles.lines(new File(out, 'barcodes.tsv.gz')) == ['LIB_VILLAGE_AAAA', 'LIB_VILLAGE_CCCC', 'LIB_VILLAGE_GGGG', 'LIB_VILLAGE_TTTT'] }
+            )
+        }
+    }
+
+    test("Should stop in BUILD_LIBRARY_CELL_METADATA when the donor file lists a donor twice") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_donor_join_duplicate.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            def output = (workflow.stdout + workflow.stderr).join('\n') + log
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.trace.failed().any { it.name.contains('BUILD_LIBRARY_CELL_METADATA') } },
+                // the tool says which join failed, and nothing is published
+                { assert output.contains('Error joining') && output.contains('donor_attributes_duplicate.tsv') },
+                { assert !new File("${params.outdir}/SYN.cell_metadata.txt".toString()).exists() }
+            )
+        }
+    }
+
+    test("Should create the donor column from the manifest donor and join the donor attributes on it") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_donor_join_single.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def out = new File("${params.outdir}".toString())
+            def rows = workflow.success ? table(new File(out, 'SYN.cell_metadata.txt')) : []
+            assertAll(
+                { assert workflow.success },
+                // LIB_PLAIN_1 has no donor column: the donor N1 of the manifest is set on its three cells before the join, so all get N1's values
+                { assert rows.collect { it.cell_barcode + ':' + it.donor + ':' + it.sex } == ['AAAA:N1:male', 'CCCC:N1:male', 'GGGG:N1:male'] },
+                { assert rows.collect { it.age as double } == [63d, 63d, 63d] }
+            )
+        }
+    }
+
+    test("Should stop at the resolver, before any library is processed, when the manifest gives a donor to a village") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+                manifest = "${synthetic()}/manifest_donor_join_village_donor.yaml"
+                analysis_id = 'SYN'
+                gcp_credentials_file = "${synthetic()}/fake_credentials.json"
+            }
+        }
+
+        then {
+            def log = new File("${params.outdir}".toString()).parentFile.with { new File(it, 'meta/nextflow.log').text }
+            def output = (workflow.stdout + workflow.stderr).join('\n') + log
+            assertAll(
+                { assert workflow.failed },
+                // the cells of a village already have their donors, which a donor in the manifest must not replace: the message names the library
+                { assert output.contains('cannot be given to a library that is a village') && output.contains('LIB_VILLAGE') },
+                // the error comes before any per-library process
+                { assert !workflow.trace.tasks().any { it.name.contains('SUMMARIZE') || it.name.contains('FORMAT') || it.name.contains('BUILD') } },
+                { assert !new File("${params.outdir}/SYN.cell_metadata.txt".toString()).exists() }
+            )
+        }
+    }
 }

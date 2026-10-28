@@ -30,6 +30,23 @@ dges:
       - {joinFile: /data/extra.tsv, leftColumn: cell_barcode, joinColumn: cell}
 ```
 
+**Joins and donors.** A join adds the columns of a secondary file to the cell metadata: `leftColumn` is a column of the cell metadata and `joinColumn` a column of the file (the names can differ; the file's `joinColumn` values must be unique, and cells whose value is not in the file keep their row with empty values). A join on the donor attaches donor-level information to every cell of a donor, for example the age and sex of each donor:
+
+```yaml title="donor_attributes.tsv"
+donor   age   sex
+N1      63    male
+N2      41    female
+```
+
+```yaml title="manifest.yaml"
+dges:
+  - dge: gs://bucket/.../VILLAGE.donors.digital_expression.txt.gz    # a village: its cell metadata has a donor column
+    joins:
+      - {joinFile: /data/donor_attributes.tsv, leftColumn: donor, joinColumn: donor}
+```
+
+All cells of donor `N1` get age 63 and sex male, and a donor that is not in the file (say `N3`) keeps its cells with empty age and sex. The same join works for a library that is not a village with `donor: N1` in its entry: the donor column is created before the join. A `donor` in the manifest is **not allowed for a village**: its cell metadata already has the donor of each cell, which the manifest does not replace, so the run stops before any process starts and names the libraries.
+
 The manifest is checked before any process starts: unknown keys, wrong types, duplicate DGEs, and files that would be staged under the same name are
 reported with the DGE entry that has the problem. Every file the manifest names (DGEs, `joinFile`, `includeFile`, `excludeFile`) must exist and be
 readable with this run's credentials: all missing or unreadable files are listed at once, each with its key and DGE entries. `--analysis_id` prefixes the merged output files and must differ from every library id (its UEI).

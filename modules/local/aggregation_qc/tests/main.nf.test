@@ -38,11 +38,12 @@ nextflow_process {
     }
     def isPdf = { f -> def b = new File(f.toString()).bytes; b.length > 4 && new String(b, 0, 4, 'ISO-8859-1') == '%PDF' }
 
-    test("Should write every PDF and a donor_qc.txt with the hand-computed values for donors, cell types, conditions and core cell types") {
+    test("Should write every PDF and a donor_qc.txt with the hand-computed values, from a donor file with another name, order and line endings (CRLF, blank line, no final newline)") {
 
         when {
             process {
-                input(donors: 'donors.txt', conditions: 'conditions.tsv', core: 'core_cell_types.txt')
+                // the donor file is the untidy one: three expected donors, not five (no carriage returns in the IDs, no empty donor)
+                input(donors: 'donors_other_name.txt', conditions: 'conditions.tsv', core: 'core_cell_types.txt')
             }
         }
 
@@ -56,6 +57,8 @@ nextflow_process {
                 { assert process.out.qc[0].pdfs.every { isPdf(it) } },
                 { assert file(process.out.qc[0].donor_qc).name == 'analysis1.donor_qc.txt' },
                 { assert qc.keySet() == ['D1', 'D2', 'D3'] as Set },
+                // all three expected donors are found in the data
+                { assert qc.values().every { it.expected == 'True' || it.expected == 'true' } },
                 // nuclei, fraction (3 places), total UMIs in millions, median UMIs per nucleus (D2: even count, 60k and 200k -> 130000)
                 { assert qc.collectEntries { d, r -> [(d): [r.num_nuclei, r.fraction_nuclei, r.total_umis_m]] } ==
                     [D1: ['5', '0.417', '0.72'], D2: ['4', '0.333', '0.7'], D3: ['3', '0.25', '0.36']] },
@@ -63,26 +66,6 @@ nextflow_process {
                 // core cell type Glut: its own column, and the pooled column (one core type, so the same values)
                 { assert qc.collectEntries { d, r -> [(d): r.median_umis_per_nucleus_Glut as double] } == [D1: 200000d, D2: 300000d, D3: 160000d] },
                 { assert qc.collectEntries { d, r -> [(d): r.median_umis_per_core_cell_type as double] } == [D1: 200000d, D2: 300000d, D3: 160000d] }
-            )
-        }
-    }
-
-    test("Should give the same donor_qc.txt from a donor file with another name, order and line endings (CRLF, blank line, no final newline)") {
-
-        when {
-            process {
-                input(donors: 'donors_other_name.txt')
-            }
-        }
-
-        then {
-            def qc = donorQc(process)
-            assertAll(
-                { assert process.success },
-                // three expected donors, not five (no carriage returns in the IDs, no empty donor), all found in the data
-                { assert qc.keySet() == ['D1', 'D2', 'D3'] as Set },
-                { assert qc.values().every { it.expected == 'True' || it.expected == 'true' } },
-                { assert qc.collectEntries { d, r -> [(d): r.num_nuclei] } == [D1: '5', D2: '4', D3: '3'] }
             )
         }
     }

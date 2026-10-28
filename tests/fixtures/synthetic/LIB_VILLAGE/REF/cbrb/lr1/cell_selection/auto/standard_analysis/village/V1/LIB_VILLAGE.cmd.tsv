@@ -1,0 +1,5 @@
+cell_barcode	donor	num_transcripts	doublet
+AAAA	N1	100	singlet
+CCCC	N1	200	singlet
+GGGG	N2	300	singlet
+TTTT	N3	400	singlet

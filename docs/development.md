@@ -1,12 +1,12 @@
 # mccarroll/scrna-aggregation: Development
 
-Coding conventions, known pitfalls, ground rules, design decisions and the environment. What is left to do is in [specifications/TODO.md](specifications/TODO.md) and what is done in [specifications/DONE.md](specifications/DONE.md). How to run the tests, the live tests, the fixtures and the test catalog are in
+Coding conventions, known pitfalls, ground rules, design decisions and the environment. What is left to do is in [specifications/TODO.md](specifications/TODO.md) and what is done in [specifications/DONE.md](specifications/DONE.md). How to run the tests (unit, synthetic, live and Google Cloud Batch) is in
 [testing.md](testing.md). Run everything from the repository root.
 
 ## Conventions
 
 - Leaf-first, test-driven: each module is built and tested on its own before it is wired into the workflow.
-- Test conventions (file layout, names, file layout) are in [testing.md](testing.md).
+- Test layout and names are in [testing.md](testing.md).
 - Tool containers are fixed in each module: `quay.io/broadinstitute/drop-seq_python:current` and `quay.io/broadinstitute/drop-seq_java:current` (public images; the tools,
   including `join_and_filter_tsv --args-file`, were checked in the `current` images). To use another tag, set `container` for a process in a config with `process { withName: 'X' { container = '...' } }`.
 - Run `nextflow lint .` after changing config or Nextflow files; it reports no errors or warnings (keep it that way). Workflow and include names must be valid identifiers: use underscores
@@ -43,8 +43,8 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **`sed` on macOS** has no `\b` word boundary; use a plain case-sensitive replacement or `perl -pi -e`.
 - **`${...}` inside a nf-test `process { """...""" }` string** is interpolated by nf-test in the test context. Resolve
   variables before the `process` block and interpolate only simple values.
-- **nf-test `--filter`** selects test types (process, workflow, pipeline, function), not test names. See "How to run the
-  tests" in [testing.md](testing.md).
+- **nf-test `--filter`** selects test types (process, workflow, pipeline, function), not test names. To run one test, pass its file (and
+  optionally its `@id`) to `nf-test test`; see [testing.md](testing.md).
 - **nf-test needs `$HOME/.nf-test`** (its jar). If you point `HOME` elsewhere to simulate a missing credentials file, symlink it.
 - **Shell variables do not persist** between separate commands in the agent tooling, and commands over 120 s must run in the
   background: pass `GOOGLE_PROJECT_ID=... command` inline.
@@ -73,7 +73,7 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **In nf-test, `file(...)` returns a `java.io.File`**: `.parent` is a String, use `.parentFile`. Do not name a helper in a test class `run`.
 - **Binary outputs (h5ad) are checked by running the image's tools with `docker run`** from the test, on a directory inside the repo (Docker cannot mount the scratchpad): `aggregate_filter_adata --view_columns`, `--view_values obs.<col>` and `--output-format 10x_mtx` (which sorts the genes by ID), and `h5py` through `/usr/local/dropseq/venv/dropseq/bin/python` for the HDF5 paths. Clear the export directory first: stale files would pass.
 - **h5ad and anndata 0.13:** pandas string columns are written as `nullable-string-array` groups (a mask and values) unless `anndata.settings.allow_write_nullable_strings` is off; `build_library_h5ad` turns it off. `sanitize_dataframe` turns a column whose non-missing values are all numbers into a number column (a donor `1` becomes a number) and makes a string column categorical only if it has fewer unique values than half the rows.
-- **The live pipeline test needs `GOOGLE_PROJECT_ID`** (`bican-um1-mccarroll`), or it stops at the credentials check. The public Drop-seq repo's default branch is `master`, not `main`: pull requests go to `master`.
+- **The live pipeline test needs `GOOGLE_PROJECT_ID`** (`mccarroll-scrna-seq`), or it stops at the credentials check. The public Drop-seq repo's default branch is `master`, not `main`: pull requests go to `master`.
 - **The `drop-seq_python` image has no `python3` on the PATH**; its Python is `/usr/local/dropseq/venv/dropseq/bin/python`.
 - **The README workflow figure** is `docs/figures/workflow.svg`, rendered from the Mermaid source `docs/figures/workflow.mmd` (GitHub cannot include one file in another, so the README embeds the SVG and links the source; it also draws the `.mmd` file on its own). After changing the source, run `docs/figures/render.sh` (it runs `npx @mermaid-js/mermaid-cli`; needs Node.js and network access the first time) and commit both files: nothing else regenerates the SVG. Keep the default HTML labels: with `htmlLabels: false` long process names wrap in the middle of a word.
 - **Mermaid figures must not depend on the renderer's theme.** VSCode's Mermaid preview ignores the
@@ -87,7 +87,7 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
 - **nf-test helpers that build input text (session 16):** `${moduleDir}` is substituted by nf-test only in literal `process { """...""" }` blocks, not in a string a helper builds; a helper must build fixture paths from `System.getProperty('user.dir')` (the repository root), as `resolver.function.nf.test` and `modules/local/aggregation_qc/tests/main.nf.test` do.
 - **`log.warn` is not in `workflow.stdout`** in a pipeline nf-test: read `<outdir>/../meta/nextflow.log` (see the synthetic pipeline tests). Task names in `workflow.trace.tasks()` carry the workflow prefix (`MCCARROLL_SCRNA_AGGREGATION:SCRNA_AGGREGATION:AGGREGATION_QC (SYN)`): use `contains`, not `startsWith`.
 - **`ext.args` can be a closure that reads the task's inputs** (`ext.args = { cell_type_column ? '' : '--umi-column num_transcripts' }` in `tests/synthetic.config`).
-- **The pipeline validation tests need `GOOGLE_PROJECT_ID`** (the credentials pre-flight check fails without it): `GOOGLE_PROJECT_ID=bican-um1-mccarroll nf-test test tests/pipeline.validation.nf.test`.
+- **The pipeline validation tests need `GOOGLE_PROJECT_ID`** (the credentials pre-flight check fails without it): `GOOGLE_PROJECT_ID=mccarroll-scrna-seq nf-test test tests/pipeline.validation.nf.test`.
 
 ## Ground rules (from the user)
 
@@ -141,12 +141,12 @@ Coding conventions, known pitfalls, ground rules, design decisions and the envir
   aggregation tools is in `/Users/nemesh/dropseqrna/transcriptome_java/public/src/python/src/dropseq/aggregation/`); the images run under emulation on this arm64 Mac, so allow time.
 - nextflow 26.10.0, nf-test 0.9.5, docker (default nf-test profile `docker,test`). Images (linux/amd64, pulled by Docker): `quay.io/broadinstitute/drop-seq_python:current` (image `e62c02daf515`, with `build_library_h5ad --uppercase-column`, checked on 2026-10-26) and
   `quay.io/broadinstitute/drop-seq_java:current` (digest `e3230deb...`, checked on 2026-10-19).
-- `GOOGLE_PROJECT_ID=bican-um1-mccarroll` (not a secret). The baseline is `tests/live_data/baseline` (git-ignored), made by the prototype script on `tests/live_data/manifest.yaml`; the command is in `../testing.md`.
+- `GOOGLE_PROJECT_ID=mccarroll-scrna-seq` (not a secret). The baseline is `tests/live_data/baseline` (git-ignored), made by the prototype script on `tests/live_data/manifest.yaml`; the command is in `../testing.md`.
 
 ## Google Batch and Seqera (settled in sessions 7 to 11; details and commands in [credentials.md](credentials.md))
 
 - Google Batch tasks run as the VM's service account (with no `google.batch.serviceAccountEmail`, the project's default Compute Engine account); Nextflow itself uses the user's Application Default Credentials. No service account setup is needed when the job runs in the project that owns the data; a job in one project writing another project's bucket fails with `Permission denied`.
 - The project is passed at run time with `GOOGLE_PROJECT_ID` (and `GOOGLE_LOCATION`, `-work-dir gs://...`): user decision, no `--gcp_project` parameter and no pre-flight check, only documentation that the project must have access to the bucket where the data lives.
 - `bican-um1-mccarroll` has no `default` VPC (Google Batch fails with `CODE_GCE_RESOURCE_NOT_FOUND`): the `googlebatch` profile sets the `broad-allow` network and subnetwork.
-- nf-test cannot run on Google Batch (it always passes a local `-work-dir`), so the Google Batch checks are plain `nextflow run` scripts: `tests/batch_full_run/run.sh` (whole pipeline), `tests/batch_access_check/` and `modules/local/locate_scrna_artifacts/tests/gcs_batch_check.nf` + `gcs_batch.config` (this one sits next to `tests/nextflow.config`, which Nextflow auto-loads; `gcs_batch.config` clears `process.containerOptions` for that reason).
+- nf-test cannot run on Google Batch (it always passes a local `-work-dir`), so the Google Batch checks are plain `nextflow run` scripts: `tests/google_cloud_batch_run/run.sh` (whole pipeline), `tests/batch_access_check/` and `modules/local/locate_scrna_artifacts/tests/gcs_batch_check.nf` + `gcs_batch.config` (this one sits next to `tests/nextflow.config`, which Nextflow auto-loads; `gcs_batch.config` clears `process.containerOptions` for that reason).
 - Memory: `MAKE_TRIPLET_DGE`, `DONOR_METACELLS` and `DONOR_CELL_TYPE_METACELLS` have `cpus = 6` and `memory = { 15.GB * task.attempt }` in `conf/modules.config` (the label is still `process_medium`, only memory is overridden). Keep the machine types of the `googlebatch` profile in step with these requests.

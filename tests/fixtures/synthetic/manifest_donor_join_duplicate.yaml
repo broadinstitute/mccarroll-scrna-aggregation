@@ -1,0 +1,5 @@
+# the same, with a donor file that lists N1 twice: the join must fail
+dges:
+  - dge: @ROOT@/LIB_VILLAGE/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_VILLAGE.donors.digital_expression.txt.gz
+    joins:
+      - {joinFile: @ROOT@/files/donor_attributes_duplicate.tsv, leftColumn: donor, joinColumn: donor}

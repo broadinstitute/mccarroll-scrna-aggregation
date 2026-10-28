@@ -1,0 +1,6 @@
+# a donor in the manifest for a village: the cells already have their donors, which a manifest donor must not replace; the resolver stops the run
+dges:
+  - dge: @ROOT@/LIB_VILLAGE/REF/cbrb/lr1/cell_selection/auto/standard_analysis/village/V1/LIB_VILLAGE.donors.digital_expression.txt.gz
+    donor: N7
+    joins:
+      - {joinFile: @ROOT@/files/donor_attributes.tsv, leftColumn: donor, joinColumn: donor}

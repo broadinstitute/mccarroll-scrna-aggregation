@@ -10,7 +10,10 @@ nextflow_pipeline {
     // are the published files compared with the baseline made by the prototype script: equal md5 of the decompressed content first, and the
     // differing lines only to report a mismatch. Each wired edge adds its comparisons here.
     // The libraries are resolved in the workflow (LibraryResolver); the plain-text summary of what each library is processed from is checked below.
-    // Published: the merged results flat in the output directory, artifacts/, tearsheets/ and h5ad/ (per library) and pipeline_info/; the per-library
+    // The run has run_qc = true (the optional AGGREGATION_QC step), so it also covers the one thing no other test does: the head job reads the gs://
+    // donor file of the village (LibraryResolver.commonDonorFile) with the docker profile credentials. If that read fails there is no donor_qc.txt
+    // (see docs/credentials.md). The QC-off path (nothing extra published) is covered by the synthetic pipeline test.
+    // Published: the merged results and the QC files flat in the output directory, artifacts/, tearsheets/ and h5ad/ (per library) and pipeline_info/; the per-library
     // intermediates (library metrics, joined cell metadata, MapMyCells TSV, arguments file) are checked in the work directory.
 
     def compare = { String what, generated, baseline ->
@@ -33,6 +36,7 @@ nextflow_pipeline {
         when {
             params {
                 outdir = "$outputDir"
+                run_qc = true
             }
         }
 
@@ -49,12 +53,28 @@ nextflow_pipeline {
                 def analysis = 'SMRI_V11.unfiltered'
 
                 // Published: the merged results, flat in the output directory, and three per-library records in directories of their own.
+                // The QC step adds donor_qc.txt and 8 PDFs (the cell type column of the live data is HMBA_Human_WB_v0.5_neighborhood_name; no core cell types file).
                 // Nothing else is published: the top level has exactly these entries.
                 def mergedNames = ["${analysis}.library_metrics.txt", "${analysis}.cell_metadata.txt", 'matrix.mtx.gz', 'barcodes.tsv.gz', 'features.tsv.gz',
                     "${analysis}.donor_cell_type.txt", "${analysis}.donors.metacells.txt.gz",
                     "${analysis}.donor_cell_type.metacells.txt.gz"]
-                results['published: only the merged files, artifacts/, tearsheets/, h5ad/ and pipeline_info/'] =
-                    (out.list() as List).sort() == (mergedNames + ['artifacts', 'tearsheets', 'h5ad', 'pipeline_info']).sort()
+                def qcPdfNames = ['library_metrics', 'filtered_library_metrics', 'donor_summary', 'donor_nuclei_counts', 'cell_type_counts',
+                    'cell_type_median_UMIs', 'cell_type_proportions', 'donor_cell_type_distributions'].collect { "${analysis}.${it}.pdf".toString() }
+                def donorQcName = "${analysis}.donor_qc.txt".toString()
+                results['published: only the merged files, the QC files, artifacts/, tearsheets/, h5ad/ and pipeline_info/'] =
+                    (out.list() as List).sort() == (mergedNames + [donorQcName] + qcPdfNames + ['artifacts', 'tearsheets', 'h5ad', 'pipeline_info']).sort()
+
+                // AGGREGATION_QC: donor_qc.txt equals the baseline's (same rows, columns and numbers; the same text, so the same values). It exists only if the head
+                // job read the gs:// donor file.
+                def generatedDonorQc = new File(out, donorQcName)
+                results["${donorQcName}: published (the head job read the gs:// donor file), same as the baseline"] =
+                    generatedDonorQc.exists() && compare(donorQcName, generatedDonorQc, new File(root, donorQcName))
+                // the PDFs cannot be diffed: each exists, is not empty and starts with the PDF header
+                qcPdfNames.each { name ->
+                    def pdf = new File(out, name)
+                    results["${name}: published, not empty, starts with %PDF"] = pdf.isFile() && pdf.length() > 0 &&
+                        pdf.withInputStream { s -> new String(s.readNBytes(4), 'ISO-8859-1') } == '%PDF'
+                }
 
                 // the metacells hold the output directory of the run in their first line, which is left out of the comparison
                 def body = { f -> LiveFiles.lines(f).findAll { !it.startsWith('#MakeMetacellsFromTripletDge') } }

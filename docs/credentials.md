@@ -22,11 +22,11 @@ and a project ID. How you supply them depends on where the pipeline runs.
    This writes `$HOME/.config/gcloud/application_default_credentials.json`.
 
 2. Export your project **ID** (not the project number). For the McCarroll lab single-cell data this is
-   `bican-um1-mccarroll`; adding the line to your shell profile saves repeating it. A project ID is an identifier, not
+   `mccarroll-scrna-seq`; adding the line to your shell profile saves repeating it. A project ID is an identifier, not
    a credential, so it is safe to write down. Access still requires valid credentials.
 
    ```bash
-   export GOOGLE_PROJECT_ID=bican-um1-mccarroll
+   export GOOGLE_PROJECT_ID=mccarroll-scrna-seq
    ```
 
 3. Run with the `docker` profile. The profile runs the containers as `linux/amd64`, because the Drop-seq images are
@@ -195,7 +195,7 @@ read that object, or cannot write the work directory. It is not an nf-test, beca
 
 ### Full pipeline on Google Batch
 
-`tests/batch_full_run/run.sh` runs the whole live manifest with `-profile googlebatch` and `gs://` work and output directories (default
+`tests/google_cloud_batch_run/run.sh` runs the whole live manifest with `-profile googlebatch` and `gs://` work and output directories (default
 base `gs://mccarroll_scrnaseq_central_temp/nextflow/aggregation_testing`), downloads the output, compares it with the baseline, checks that
 the `WRITE_*` processes ran in the head job and every other task on `google-batch` in the public images, and prints the requested and peak
 memory per task. Result (2026-10-21, `mccarroll-scrna-seq`, exact machine types): all 12 checks passed and the output equals the baseline; no Cloud Info or executor warnings.

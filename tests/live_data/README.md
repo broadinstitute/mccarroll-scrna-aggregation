@@ -1,6 +1,6 @@
 # Live test inputs
 
-Manifests of real `gs://` DGEs (bucket `mccarroll_scrnaseq_central_temp`, project `bican-um1-mccarroll`) used by the live
+Manifests of real `gs://` DGEs (bucket `mccarroll_scrnaseq_central_temp`, project `mccarroll-scrna-seq`) used by the live
 tests (`tests/run_all_tests.sh`) and as input of the prototype script
 `docs/specifications/scrna-aggregation_prototype.sh`, which produces the baseline the live tests compare against.
 
