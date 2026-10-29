@@ -27,6 +27,12 @@ Larger, optional (later):
 8. `main.nf` declares nf-core template parameters that nothing here uses (`pipelines_testdata_base_path`, `trace_report_suffix`, the `config_profile_*` set): remove them (touches the schema and the nf-core utilities).
 9. The helper for "join with the libraries, collect, then `toSorted` by `position`" (`metrics_sorted`, `built_sorted`), only if a typed function can read record fields (`a.position`) without a lint error.
 
+Also: **purge leftover nf-core template code and documentation** (a separate pass, after or before the items above; check each candidate before deleting, and keep what the pipeline still uses). Candidates found by a quick look in session 18, none checked in detail:
+- `.github/`: `CONTRIBUTING.md`, `ISSUE_TEMPLATE/`, `PULL_REQUEST_TEMPLATE.md`, `actions/` (do they match this repo's workflow, and are there workflows that run?). `.nf-core.yml` (the nf-core lint config; does it still do anything?).
+- `subworkflows/nf-core/` (`utils_nextflow_pipeline`, `utils_nfcore_pipeline`, `utils_nfschema_plugin`, with their `tests/` and `meta.yml`, and `modules.json`): find which functions the pipeline calls (`workflowVersionToYAML`, `completionSummary`, the config and schema checks, `UTILS_NEXTFLOW_PIPELINE`) and drop the rest, or keep the three as installed code and delete only the unused stubs around them (the choice affects `modules.json` and the 4 nf-core test files in the suite).
+- `main.nf`, `nextflow.config`, `nextflow_schema.json`, `conf/` (`base.config`, `test.config`): template parameters and profiles nothing uses (see item 8: `pipelines_testdata_base_path`, `trace_report_suffix`, `config_profile_*`, `help_full`, `show_hidden`, institutional profile hooks, the `test` profile).
+- Docs: `docs/README.md`, `docs/usage.md` (sections copied from the template: the `-profile`, `-resume`, `-c` and `nf-core/configs` text, "Updating the pipeline", the links to `nf-core/launch`), `docs/output.md` (the "Pipeline information" boilerplate), `CHANGELOG.md` ("created with the nf-core template"), and the repository `README.md`.
+
 Looked at and left alone: `cell_type_column` uses `''` for "none" (a value channel carrying `null` is risky); the head job reads the artifact YAMLs and donor files (errors appear before any process starts); the aliased modules (`MERGE_*`, the two `*_METACELLS`). Not read in depth: `AggregationManifest`, `JoinFilterArguments`, the modules' scripts and `conf/`.
 
 ## Needs more data
