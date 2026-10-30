@@ -47,18 +47,24 @@ dges:
   - dge: gs://bucket/path/LIBRARY_2.donors.digital_expression.txt.gz
 ```
 
-Now, you can run the pipeline using:
+There are three ways to run the pipeline.
+
+### 1. From the GitHub URL
+
+Nextflow pulls the pipeline directly from GitHub. Add `-r <tag-or-branch>` to pin a version.
 
 ```bash
 export GOOGLE_PROJECT_ID=<your project>
-nextflow run mccarroll/scrna-aggregation \
+nextflow run broadinstitute/mccarroll-scrna-aggregation \
    -profile docker \
    --manifest manifest.yaml \
    --analysis_id MY_ANALYSIS \
    --outdir <OUTDIR>
 ```
 
-To run the pipeline on Seqera Platform (Tower) instead, use the `launchScrnaAggregation` script from
+### 2. On Seqera Platform (Tower)
+
+Use the `launchScrnaAggregation` script from
 [mccarroll_tw_clp](https://github.com/broadinstitute/mccarroll_tw_clp). It takes the same manifest and launches the run for you:
 
 ```bash
@@ -69,6 +75,21 @@ uvx --from 'https://git@github.com/broadinstitute/mccarroll_tw_clp.git' launchSc
 ```
 
 See the mccarroll_tw_clp repository for the full list of options.
+
+### 3. From a local checkout
+
+Useful for development, or for running changes that are not pushed yet.
+
+```bash
+git clone https://github.com/broadinstitute/mccarroll-scrna-aggregation.git
+cd mccarroll-scrna-aggregation
+export GOOGLE_PROJECT_ID=<your project>
+nextflow run . \
+   -profile docker \
+   --manifest manifest.yaml \
+   --analysis_id MY_ANALYSIS \
+   --outdir <OUTDIR>
+```
 
 The manifest options (donor, filters, joins, defaults) and the optional parameters (`--mmc_model`, `--mmc_level`) are described in
 [docs/usage.md](docs/usage.md), and the files in `<OUTDIR>` in [docs/output.md](docs/output.md). The documentation index is [docs/README.md](docs/README.md); running the
