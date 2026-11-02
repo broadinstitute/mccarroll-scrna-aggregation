@@ -47,7 +47,9 @@ dges:
   - dge: gs://bucket/path/LIBRARY_2.donors.digital_expression.txt.gz
 ```
 
-There are three ways to run the pipeline.
+There are three ways to run the pipeline. Options 1 and 3 as written use the `docker` profile, so the tasks run on your own machine. Option 2 runs
+on Google Cloud: the Seqera workspace's Google Batch compute environment supplies the project, region, work directory and credentials. To run options 1 or 3 on
+Google Cloud Batch yourself, use the `googlebatch` profile instead; see [docs/credentials.md](docs/credentials.md).
 
 ### 1. From the GitHub URL
 
@@ -64,7 +66,7 @@ nextflow run broadinstitute/mccarroll-scrna-aggregation \
 
 ### 2. On Seqera Platform (Tower)
 
-Use the `launchScrnaAggregation` script from
+The tasks run on Google Cloud Batch. Use the `launchScrnaAggregation` script from
 [mccarroll_tw_clp](https://github.com/broadinstitute/mccarroll_tw_clp). It takes the same manifest and launches the run for you:
 
 ```bash
