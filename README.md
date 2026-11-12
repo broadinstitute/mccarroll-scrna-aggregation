@@ -17,7 +17,7 @@ The main steps are:
 4. Write an h5ad file for each library (`BUILD_LIBRARY_H5AD`, in `h5ad/`): its counts, with its cell metadata as `obs` and the gene IDs and symbols as `var`.
 5. Merge the cell metadata (`MERGE_CELL_METADATA`) and the DGEs into one sparse matrix (`MAKE_TRIPLET_DGE`).
 6. With donors: the donor by cell type report (`DONOR_CELL_TYPE_REPORT`) and the donor and donor by cell type metacells (`DONOR_METACELLS`, `DONOR_CELL_TYPE_METACELLS`).
-7. Optionally (`--run_qc true`): PDFs of library, donor and cell type QC and `donor_qc.txt`, in `qc_plots/` (`AGGREGATION_QC`).
+7. Optionally (`--run_qc`): PDFs of library, donor and cell type QC and `donor_qc.txt`, in `qc_plots/` (`AGGREGATION_QC`).
 
 ![Workflow of the pipeline: the manifest is checked and the artifacts located; each library is summarized and gets its cell metadata and its h5ad file; the libraries are then merged and the donor steps run](docs/figures/workflow.svg)
 
@@ -61,7 +61,8 @@ nextflow run broadinstitute/mccarroll-scrna-aggregation \
    -profile docker \
    --manifest manifest.yaml \
    --analysis_id MY_ANALYSIS \
-   --outdir <OUTDIR>
+   --outdir <OUTDIR> \
+   # --run_qc
 ```
 
 ### 2. On Seqera Platform (Tower)
@@ -73,6 +74,7 @@ The tasks run on Google Cloud Batch. Use the `launchScrnaAggregation` script fro
 uvx --from 'https://git@github.com/broadinstitute/mccarroll_tw_clp.git' launchScrnaAggregation \
    --analysis-id MY_ANALYSIS \
    --project <your project> \
+   # --run-qc \
    -v manifest.yaml
 ```
 
@@ -90,8 +92,11 @@ nextflow run . \
    -profile docker \
    --manifest manifest.yaml \
    --analysis_id MY_ANALYSIS \
-   --outdir <OUTDIR>
+   --outdir <OUTDIR> \
+   # --run_qc
 ```
+
+The optional QC step (`AGGREGATION_QC`) writes a set of QC plots (PDFs of library, donor and cell type QC) and `donor_qc.txt` to `qc_plots/` in the output directory. It is off by default; add `--run_qc` (`--run-qc` for the Seqera launcher) to run it. It needs every library to have the same donors (otherwise there are no donor outputs) and MapMyCells results (otherwise there are no cell type outputs); `--qc_conditions_file` or `--qc_condition_column` (not both) and `--qc_core_cell_types` are optional.
 
 The manifest options (donor, filters, joins, defaults) and the optional parameters (`--mmc_model`, `--mmc_level`) are described in
 [docs/usage.md](docs/usage.md), and the files in `<OUTDIR>` in [docs/output.md](docs/output.md). The documentation index is [docs/README.md](docs/README.md); running the
