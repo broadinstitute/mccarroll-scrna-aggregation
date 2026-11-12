@@ -52,7 +52,7 @@ cell type column, the steps that need them are skipped with a warning.
 <details markdown="1">
 <summary>Output files</summary>
 
-Only with `--run_qc true`. All of them are in the directory `qc_plots/` of the output directory (the rest of the output does not change), and are named after the analysis id. Which of them exist depends on the inputs: the tool
+Only with `--run_qc`. All of them are in the directory `qc_plots/` of the output directory (the rest of the output does not change), and are named after the analysis id. Which of them exist depends on the inputs: the tool
 writes what it can and logs each output it skips (it still succeeds).
 
 - `qc_plots/<analysis>.library_metrics.pdf`, `qc_plots/<analysis>.filtered_library_metrics.pdf` - the library metrics, per library (always).
